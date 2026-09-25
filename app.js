@@ -72,16 +72,79 @@ function todayKey(){ const d = new Date(); return DAYS[(d.getDay() + 6) % 7]; }
 function esc(s){ return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function todayISO(){ const d = new Date(); const p = n => String(n).padStart(2, "0"); return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate()); }
 
+const LESSON_COUNT = 8;
+const EXTRA_COUNT = 2;
+const TOTAL_ROWS = LESSON_COUNT + EXTRA_COUNT;
+
+function defaultLessonSlots(){
+  return [
+    { num: "1", label: "", start: "08:00", end: "08:45" },
+    { num: "2", label: "", start: "08:55", end: "09:40" },
+    { num: "3", label: "", start: "09:50", end: "10:35" },
+    { num: "4", label: "", start: "10:50", end: "11:35" },
+    { num: "5", label: "", start: "11:45", end: "12:30" },
+    { num: "6", label: "", start: "12:40", end: "13:25" },
+    { num: "7", label: "", start: "13:35", end: "14:20" },
+    { num: "8", label: "", start: "14:30", end: "15:15" }
+  ];
+}
+function defaultExtraSlots(){
+  return [
+    { num: "★1", label: "Гурток 1", start: "16:00", end: "17:00" },
+    { num: "★2", label: "Гурток 2", start: "17:15", end: "18:15" }
+  ];
+}
 function defaultSlots(){
-  const t = [["08:00","08:45"],["08:55","09:40"],["09:50","10:35"],["10:45","11:30"],["11:40","12:25"],["12:35","13:20"]];
-  return t.map((p, i) => ({ label: String(i + 1), start: p[0], end: p[1] }));
+  return defaultLessonSlots().concat(defaultExtraSlots());
+}
+function isExtraRow(i){ return i >= LESSON_COUNT; }
+function normalizeSlots(slots){
+  const list = Array.isArray(slots) ? slots.map(s => ({
+    num: String(s && (s.num !== undefined && s.num !== null ? s.num : (s.label !== undefined && s.label !== null ? s.label : ""))),
+    label: (s && s.label) ? String(s.label) : "",
+    start: (s && s.start) || "",
+    end: (s && s.end) || ""
+  })) : [];
+  const dL = defaultLessonSlots(), dE = defaultExtraSlots();
+  const lessons = list.slice(0, LESSON_COUNT);
+  const extras = list.slice(LESSON_COUNT, TOTAL_ROWS);
+  while (lessons.length < LESSON_COUNT){
+    const d = dL[lessons.length];
+    lessons.push({ num: String(lessons.length + 1), label: "", start: d.start, end: d.end });
+  }
+  while (extras.length < EXTRA_COUNT){
+    const d = dE[extras.length];
+    extras.push({ num: d.num, label: d.label, start: d.start, end: d.end });
+  }
+  lessons.forEach((s, i) => { if (!s.num) s.num = String(i + 1); });
+  extras.forEach((s, i) => { if (!s.num) s.num = "★" + (i + 1); });
+  return lessons.concat(extras).slice(0, TOTAL_ROWS);
+}
+function emptyDaySlots(){
+  const arr = [];
+  for (let i = 0; i < TOTAL_ROWS; i++) arr.push(null);
+  return arr;
+}
+function emptyDayObject(){
+  const o = {};
+  DAYS.forEach(d => { o[d] = emptyDaySlots(); });
+  return o;
+}
+function normalizeDay(arr){
+  const out = Array.isArray(arr) ? arr.map(v => {
+    if (v && typeof v === "object") return { subject: v.subject || "", room: v.room || "", color: v.color || "" };
+    if (typeof v === "string") return { subject: v, room: "", color: "" };
+    return null;
+  }) : [];
+  while (out.length < TOTAL_ROWS) out.push(null);
+  return out.slice(0, TOTAL_ROWS);
 }
 function newChild(name){
   const palette = ["#4c8df6","#f97072","#2fbf71","#e6a23c","#9b59b6","#23b6a9","#f06292"];
   return {
     id: uid(), name: name || "Нова дитина", class: "", color: palette[Math.floor(Math.random()*palette.length)],
     slots: defaultSlots(),
-    days: Object.fromEntries(DAYS.map(d => [d, []])),
+    days: emptyDayObject(),
     subjectColors: {},
     homework: [], exams: []
   };
@@ -157,6 +220,12 @@ async function loadAll(){
     remote = await gistFetch();
     if (remote && remote !== "missing" && remote !== "corrupt") state.data = remote;
   }
+  if (!state.data.children) state.data.children = [];
+  state.data.children.forEach(ch => {
+    ch.slots = normalizeSlots(ch.slots);
+    if (!ch.days) ch.days = emptyDayObject();
+    DAYS.forEach(d => { ch.days[d] = normalizeDay(ch.days[d]); });
+  });
   if (!state.activeChildId && state.data.children.length) state.activeChildId = state.data.children[0].id;
   syncIndicator();
   renderAll();
@@ -247,20 +316,32 @@ function renderSchedule(child){
   thead.appendChild(hr); table.appendChild(thead);
   const tbody = document.createElement("tbody");
 
-  child.slots.forEach((slot, si) => {
+  child.slots = normalizeSlots(child.slots);
+  DAYS.forEach(d => { child.days[d] = normalizeDay(child.days[d]); });
+
+  for (let si = 0; si < TOTAL_ROWS; si++){
+    const slot = child.slots[si] || {};
     const row = document.createElement("tr");
-    const time = document.createElement("td"); time.className = "time-cell";
-    time.innerHTML = '<span class="slot-num">' + esc(slot.label) + '</span><span class="slot-hours">' + esc(slot.start) + ' – ' + esc(slot.end) + '</span>';
+    if (isExtraRow(si)) row.classList.add("extra-row");
+
+    const time = document.createElement("td");
+    time.className = "time-cell" + (isExtraRow(si) ? " extra-time" : "");
+    const numTxt = slot.num || String(si + 1);
+    const kindTxt = slot.label ? esc(slot.label) : (isExtraRow(si) ? "Додаткове" : "Урок");
+    time.innerHTML = '<span class="slot-num">' + esc(numTxt) + '</span><span class="slot-kind">' + kindTxt + '</span><span class="slot-hours">' + esc(slot.start) + ' – ' + esc(slot.end) + '</span>';
     row.appendChild(time);
+
     DAYS.forEach(d => {
       const td = document.createElement("td");
-      const slotBox = document.createElement("div"); slotBox.className = "cell-slot";
+      const slotBox = document.createElement("div");
+      slotBox.className = "cell-slot" + (isExtraRow(si) ? " extra-slot" : "");
       slotBox.dataset.day = d; slotBox.dataset.slot = String(si);
       const val = child.days[d] && child.days[d][si];
       if (val && (val.subject || val.room)){
         const color = val.color || getSubjectColor(child, val.subject);
         const lesson = document.createElement("div");
-        lesson.className = "lesson-card"; lesson.draggable = true;
+        lesson.className = "lesson-card" + (isExtraRow(si) ? " extra-card" : "");
+        lesson.draggable = true;
         lesson.style.background = color;
         lesson.dataset.day = d; lesson.dataset.slot = String(si);
         lesson.title = (val.subject || "") + (val.room ? " • " + val.room : "") + " — тягніть щоб перемістити";
@@ -277,7 +358,10 @@ function renderSchedule(child){
         lesson.addEventListener("dragend", () => { lesson.classList.remove("dragging"); clearDragOver(); dragSrc = null; });
         slotBox.appendChild(lesson);
       } else {
-        const empty = document.createElement("button"); empty.type = "button"; empty.className = "lesson-empty"; empty.textContent = "+ Додати урок";
+        const empty = document.createElement("button");
+        empty.type = "button";
+        empty.className = "lesson-empty" + (isExtraRow(si) ? " extra-add" : "");
+        empty.textContent = isExtraRow(si) ? "+ Додати заняття" : "+ Додати урок";
         empty.addEventListener("click", () => openCellEditor(child.id, d, si));
         slotBox.appendChild(empty);
       }
@@ -294,7 +378,7 @@ function renderSchedule(child){
       td.appendChild(slotBox); row.appendChild(td);
     });
     tbody.appendChild(row);
-  });
+  }
   table.appendChild(tbody); wrap.appendChild(table); card.appendChild(wrap);
   return card;
 }
@@ -422,20 +506,69 @@ let slotCtx = null;
 function openSlotEditor(){
   const child = activeChild(); if (!child) return;
   slotCtx = child;
+  child.slots = normalizeSlots(child.slots);
   $("#slot-title").textContent = "Розклад дзвінків: " + child.name;
-  $("#slot-textarea").value = child.slots.map(s => s.label + "|" + s.start + "-" + s.end).join("\n");
+
+  const lessons = child.slots.slice(0, LESSON_COUNT);
+  const extras = child.slots.slice(LESSON_COUNT, TOTAL_ROWS);
+
+  const lessonsHtml = lessons.map((s, i) => `
+    <div class="slot-row" data-kind="lesson" data-idx="${i}">
+      <span class="slot-row-num">${i + 1}</span>
+      <input type="time" class="slot-start" value="${esc(s.start || '08:00')}">
+      <span class="slot-dash">–</span>
+      <input type="time" class="slot-end" value="${esc(s.end || '08:45')}">
+    </div>
+  `).join("");
+
+  const extrasHtml = extras.map((s, i) => `
+    <div class="slot-row extra" data-kind="extra" data-idx="${i}">
+      <span class="slot-row-num">★${i + 1}</span>
+      <input type="text" class="slot-label" placeholder="Назва (напр. Гурток / Футбол)" value="${esc(s.label || '')}">
+      <input type="time" class="slot-start" value="${esc(s.start || '16:00')}">
+      <span class="slot-dash">–</span>
+      <input type="time" class="slot-end" value="${esc(s.end || '17:00')}">
+    </div>
+  `).join("");
+
+  const lList = $("#slot-lessons-list");
+  if (lList) lList.innerHTML = lessonsHtml;
+  const eList = $("#slot-extras-list");
+  if (eList) eList.innerHTML = extrasHtml;
+
   show("modal-slots");
 }
 function commitSlots(){
   if (!slotCtx) return;
-  const slots = [];
-  $("#slot-textarea").value.split(/\r?\n+/).map(s => s.trim()).filter(Boolean).forEach(line => {
-    const parts = line.split("|");
-    const pp = (parts[1] || "08:00-08:45").split("-");
-    slots.push({ label: (parts[0] || "").trim(), start: (pp[0] || "08:00").trim(), end: (pp[1] || "08:45").trim() });
+  const newSlots = [];
+
+  const lessonRows = document.querySelectorAll("#slot-lessons-list .slot-row");
+  lessonRows.forEach((row, i) => {
+    const st = row.querySelector(".slot-start");
+    const en = row.querySelector(".slot-end");
+    newSlots.push({
+      num: String(i + 1),
+      label: "",
+      start: (st && st.value) || "08:00",
+      end: (en && en.value) || "08:45"
+    });
   });
-  slotCtx.slots = slots;
-  DAYS.forEach(d => { slotCtx.days[d] = slotCtx.days[d].slice(0, slots.length); });
+
+  const extraRows = document.querySelectorAll("#slot-extras-list .slot-row");
+  extraRows.forEach((row, i) => {
+    const lbl = row.querySelector(".slot-label");
+    const st = row.querySelector(".slot-start");
+    const en = row.querySelector(".slot-end");
+    newSlots.push({
+      num: "★" + (i + 1),
+      label: (lbl && lbl.value.trim()) || ("Гурток " + (i + 1)),
+      start: (st && st.value) || (i === 0 ? "16:00" : "17:15"),
+      end: (en && en.value) || (i === 0 ? "17:00" : "18:15")
+    });
+  });
+
+  slotCtx.slots = normalizeSlots(newSlots);
+  DAYS.forEach(d => { slotCtx.days[d] = normalizeDay(slotCtx.days[d]); });
   hide("modal-slots"); slotCtx = null; saveAndRender();
 }
 /* --- Element (praca domowa / sprawdzian) --- */
