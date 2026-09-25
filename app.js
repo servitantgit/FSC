@@ -7,7 +7,7 @@
 /* ---------- Konstancje ---------- */
 const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
 const DAY_SHORT = {mon:"Пн",tue:"Вт",wed:"Ср",thu:"Чт",fri:"Пт",sat:"Сб",sun:"Нд"};
-const DAY_FULL  = {mon:"Понеділок",tue:"Вівторник",wed:"Середа",thu:"Четверг",fri:"Пятниця",sat:"Субота",sun:"Неділя"};
+const DAY_FULL  = {mon:"Понеділок",tue:"Вівторок",wed:"Середа",thu:"Четвер",fri:"П'ятниця",sat:"Субота",sun:"Неділя"};
 const LS_DATA = "fsc.data.v1";
 const LS_SETTINGS = "fsc.settings.v1";
 const GIST_FILENAME = "schedule.json";
@@ -34,7 +34,7 @@ function defaultSlots(){
 function newChild(name){
   const palette = ["#4c8df6","#f97072","#2fbf71","#e6a23c","#9b59b6","#23b6a9","#f06292"];
   return {
-    id: uid(), name: name || "Нова дитяча", class: "", color: palette[Math.floor(Math.random()*palette.length)],
+    id: uid(), name: name || "Нова дитина", class: "", color: palette[Math.floor(Math.random()*palette.length)],
     slots: defaultSlots(),
     days: Object.fromEntries(DAYS.map(d => [d, []])),
     homework: [], exams: []
@@ -91,30 +91,30 @@ async function loadAll(){
   loadLocal();
   let remote = null;
   if (state.settings.gistId){
-    setSync("busy", "Читаю Gist…");
+    setSync("busy", "Завантаження з Gist…");
     remote = await gistFetch();
     if (remote && remote !== "missing" && remote !== "corrupt") state.data = remote;
   }
   if (!state.activeChildId && state.data.children.length) state.activeChildId = state.data.children[0].id;
   syncIndicator();
   renderAll();
-  if (remote === "corrupt") setSync("err", "Gist пошківаний — дані локально");
+  if (remote === "corrupt") setSync("err", "Gist пошкоджено — дані завантажено локально");
   return remote;
 }
 
 async function saveAll(){
   saveLocal();
   if (state.settings.gistId){
-    setSync("busy", "Зберігаю в Gist…");
+    setSync("busy", "Збереження в Gist…");
     const id = await gistPush(state.data);
-    if (id){ state.settings.gistId = id; saveLocal(); setSync("ok", "Синхронизація активна"); }
-    else setSync("err", "Не вдалось записать — перевірь token/Gist ID");
+    if (id){ state.settings.gistId = id; saveLocal(); setSync("ok", "Синхронізація активна"); }
+    else setSync("err", "Не вдалося зберегти — перевірте токен або Gist ID");
   } else {
-    setSync("off", "Gist не налашов — данi тільки локально");
+    setSync("off", "Gist не налаштовано — дані лише локально");
   }
 }
 
-function syncIndicator(){ state.settings.gistId ? setSync("ok", "Gist активна") : setSync("off", "Gist не налашов"); }
+function syncIndicator(){ state.settings.gistId ? setSync("ok", "Синхронізація активна") : setSync("off", "Gist не налаштовано"); }
 /* ============ Renderowanie ============ */
 function activeChild(){ return state.data.children.find(c => c.id === state.activeChildId); }
 function renderAll(){ renderChildTabs(); renderToolbar(); renderContent(); }
@@ -147,9 +147,9 @@ function renderToolbar(){
   const child = activeChild();
   if (!child){ t.hidden = true; return; }
   t.hidden = false;
-  const seg = mk("span", "muted", child.class ? child.name + " . " + child.class : child.name);
+  const seg = mk("span", "muted", child.class ? child.name + " • " + child.class : child.name);
   seg.style.fontSize = "13px";
-  const editSlots = mk("button", "tool-btn", "Часі уроків", openSlotEditor);
+  const editSlots = mk("button", "tool-btn", "Розклад дзвінків", openSlotEditor);
   const addHw = mk("button", "tool-btn", "+ Домашка", () => openItemEditor("homework"));
   const addEx = mk("button", "tool-btn", "+ Контрольна", () => openItemEditor("exams"));
   const del = mk("button", "tool-btn", "Видалити"); del.style.color = "var(--err)";
@@ -161,23 +161,23 @@ function renderContent(){
   const child = activeChild(); const main = $("#content"); main.innerHTML = "";
   if (!child){
     const d = mk("div", "empty");
-    d.textContent = "Натисніть «+» вверху, щоб додати першу дитячу і завести розклад.";
+    d.textContent = "Натисніть «+» вгорі, щоб додати дитину та створити розклад.";
     main.appendChild(d); return;
   }
   const wrap = document.createElement("div");
   wrap.style.display = "flex"; wrap.style.flexDirection = "column"; wrap.style.gap = "14px";
   wrap.appendChild(renderSchedule(child));
-  wrap.appendChild(renderListCard(child, "homework", "Домашні задавання"));
-  wrap.appendChild(renderListCard(child, "exams", "Контрольні / екзамени"));
+  wrap.appendChild(renderListCard(child, "homework", "Домашні завдання"));
+  wrap.appendChild(renderListCard(child, "exams", "Контрольні та іспити"));
   main.appendChild(wrap);
 }
 function renderSchedule(child){
   const card = mk("div", "card");
-  card.appendChild(mk("h3", null, "Розклад на тиждень — натисніть на кліточку"));
-  if (!child.slots.length){ card.appendChild(mk("div", "empty", "Нет жодного часу. Натисніть «Часі уроків», щоб задати часлаганало.")); return card; }
+  card.appendChild(mk("h3", null, "Розклад на тиждень — натисніть на клітинку для редагування"));
+  if (!child.slots.length){ card.appendChild(mk("div", "empty", "Немає уроків. Натисніть «Розклад дзвінків», щоб задати час.")); return card; }
   const table = document.createElement("div"); table.className = "sched"; table.style.overflow = "auto";
   const head = document.createElement("div"); head.className = "sched-row"; head.style.fontWeight = "700"; head.style.color = "var(--muted)";
-  head.appendChild(mk("span", "time", "час"));
+  head.appendChild(mk("span", "time", "Час"));
   const hc = document.createElement("div"); hc.className = "cells";
   DAYS.forEach(d => { const c = mk("span", "cell", DAY_SHORT[d]); c.style.cssText = "flex:0 0 64px;border-style:dashed;background:transparent;cursor:default"; hc.appendChild(c); });
   head.appendChild(hc); table.appendChild(head);
@@ -275,7 +275,7 @@ let slotCtx = null;
 function openSlotEditor(){
   const child = activeChild(); if (!child) return;
   slotCtx = child;
-  $("#slot-title").textContent = "Часі уроків: " + child.name;
+  $("#slot-title").textContent = "Розклад дзвінків: " + child.name;
   $("#slot-textarea").value = child.slots.map(s => s.label + "|" + s.start + "-" + s.end).join("\n");
   show("modal-slots");
 }
@@ -297,13 +297,13 @@ function openItemEditor(kind, item){
   const child = activeChild(); if (!child) return;
   itemCtx = { kind, childId: child.id, item: item || null };
   const isHw = kind === "homework";
-  $("#item-title").textContent = (item ? "Редакт" : "Додати") + (isHw ? " домашку" : " контрольную");
+  $("#item-title").textContent = (item ? "Редагувати" : "Додати") + (isHw ? " домашнє завдання" : " контрольну / іспит");
   $("#item-subject").value = (item && item.subject) || "";
   $("#item-text").value = (item && item.text) || "";
   $("#item-date").value = (item && item.date) || todayISO();
   $("#item-extra").value = (item && isHw ? item.class : item.room) || (isHw ? "" : "");
-  $("#item-extra").placeholder = isHw ? "Клас" : "Сала";
-  $("#item-extra-label").textContent = isHw ? "Клас (опціонально)" : "Сала (опціонально)";
+  $("#item-extra").placeholder = isHw ? "Клас / примітка" : "Кабінет";
+  $("#item-extra-label").textContent = isHw ? "Клас або примітка (необов'язково)" : "Кабінет (необов'язково)";
   $("#item-extra").hidden = false;
   show("modal-item"); focusField("item-subject");
 }
@@ -330,7 +330,7 @@ function commitItem(){
 
 /* --- Dodawanie / usuwanie dziecka --- */
 function openChildModal(){
-  $("#modal-child-title").textContent = "Нова дитяча";
+  $("#modal-child-title").textContent = "Нова дитина";
   $("#child-name").value = ""; $("#child-class").value = ""; $("#child-color").value = "#4c8df6";
   show("modal-child"); focusField("child-name");
 }
@@ -344,7 +344,7 @@ function saveChild(){
 }
 function delChild(id){
   const c = state.data.children.find(x => x.id === id) || {};
-  confirmAsync("Видалити дитячу «" + c.name + "» і весь її розклад?", () => {
+  confirmAsync("Видалити дитину «" + c.name + "» та весь її розклад?", () => {
     state.data.children = state.data.children.filter(x => x.id !== id);
     if (state.activeChildId === id) state.activeChildId = state.data.children.length ? state.data.children[0].id : null;
     saveAndRender();
@@ -362,14 +362,14 @@ function confirmAsync(msg, onOk){
 function openSettings(){
   $("#set-gist-id").value = state.settings.gistId || "";
   $("#set-token").value = state.settings.token || "";
-  $("#settings-status").textContent = state.settings.gistId ? "Gist налашов (вЂ¦" + state.settings.gistId.slice(-8) + ")" : "Gist не налашов — данi тільки локально";
+  $("#settings-status").textContent = state.settings.gistId ? "Gist налаштовано (…" + state.settings.gistId.slice(-8) + ")" : "Gist не налаштовано — дані лише локально";
   show("modal-settings");
 }
 function saveSettings(){
   state.settings.gistId = $("#set-gist-id").value.trim();
   state.settings.token = $("#set-token").value.trim();
   saveLocal(); saveAll();
-  $("#settings-status").textContent = "Збережено. Синхронизирую…";
+  $("#settings-status").textContent = "Збережено. Синхронізація…";
 }
 
 /* ============ Eksport / import ============ */
@@ -384,8 +384,8 @@ function doImport(file){
   file.text().then(text => {
     try {
       const parsed = JSON.parse(text);
-      if (parsed && Array.isArray(parsed.children)){ state.data = parsed; saveAndRender(); alert("Імпорт завершено ✔"); }
-      else alert("Файл не схож — нема поля «children».");
+      if (parsed && Array.isArray(parsed.children)){ state.data = parsed; saveAndRender(); alert("Імпорт успішно завершено ✔"); }
+      else alert("Некоректний формат файлу — відсутнє поле «children».");
     } catch (e){ alert("Помилка читання JSON: " + e.message); }
   }).catch(e => alert("Помилка: " + e.message));
 }
@@ -394,8 +394,8 @@ function doImport(file){
 function buildSidebar(){
   const nav = $("#sidebar-nav"); nav.innerHTML = "";
   const links = [
-    ["Додати дитячу", openChildModal],
-    ["Часі уроків", openSlotEditor],
+    ["Додати дитину", openChildModal],
+    ["Розклад дзвінків", openSlotEditor],
     ["Налаштування Gist", openSettings],
     ["Експорт JSON", doExport],
     ["Імпорт JSON", () => $("#import-file").click()]

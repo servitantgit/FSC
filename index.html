@@ -13,11 +13,11 @@
     <header class="topbar">
       <div class="topbar__left">
         <button class="icon-btn" id="btn-menu" title="Меню" aria-label="Меню">☰</button>
-        <h1 class="topbar__title">Дитячий розклад</h1>
+        <h1 class="topbar__title">Розклад уроків</h1>
       </div>
       <div class="topbar__right">
-        <span class="sync-indicator" id="sync-indicator" title="Стан синхронизації"></span>
-        <button class="icon-btn" id="btn-add-child" title="Додати дитячу">＋</button>
+        <span class="sync-indicator" id="sync-indicator" title="Стан синхронізації"></span>
+        <button class="icon-btn" id="btn-add-child" title="Додати дитину">＋</button>
       </div>
     </header>
 
@@ -41,25 +41,25 @@
   <!-- Налаштування Gist -->
   <div class="modal" id="modal-settings" hidden>
     <div class="modal__card">
-      <h2>Синхронизація через Gist</h2>
-      <p class="muted">Дані зберігаються в ваш secret Gist на GitHub. Kade телефон і ноутбук читають і пишут в него — зато дані синхронизуются.</p>
-      <div class="field"><label>Gist ID</label><input type="text" id="set-gist-id" placeholder="Наприм: 1a2b3c4d5e6f7g8h" autocomplete="off"></div>
+      <h2>Синхронізація через Gist</h2>
+      <p class="muted">Дані зберігаються у вашому secret Gist на GitHub. Усі пристрої (телефон, ноутбук) читають і записують в нього, завдяки чому розклад синхронізується.</p>
+      <div class="field"><label>Gist ID</label><input type="text" id="set-gist-id" placeholder="Наприклад: 1a2b3c4d5e6f7g8h" autocomplete="off"></div>
       <div class="field"><label>GitHub token (scope «gist»)</label><input type="password" id="set-token" placeholder="github_pat_…" autocomplete="off"></div>
       <div class="row">
         <button class="btn primary" id="btn-save-settings">Зберегти</button>
-        <button class="btn ghost" id="btn-clear-sync">Відключити Gist</button>
+        <button class="btn ghost" id="btn-clear-sync">Вимкнути синхронізацію</button>
       </div>
       <p class="status" id="settings-status"></p>
-      <p class="muted small">Token лежить тільки в localStorage і відправляється виключно на api.github.com.</p>
+      <p class="muted small">Токен зберігається лише локально (localStorage) і надсилається виключно на api.github.com.</p>
     </div>
   </div>
 
   <!-- Додавання дитини -->
   <div class="modal" id="modal-child" hidden>
     <div class="modal__card">
-      <h2 id="modal-child-title">Нова дитяча</h2>
-      <div class="field"><label>Ім'я</label><input type="text" id="child-name" placeholder="Наприм: Софія"></div>
-      <div class="field"><label>Клас</label><input type="text" id="child-class" placeholder="Наприм: 5-А"></div>
+      <h2 id="modal-child-title">Нова дитина</h2>
+      <div class="field"><label>Ім'я</label><input type="text" id="child-name" placeholder="Наприклад: Софія"></div>
+      <div class="field"><label>Клас</label><input type="text" id="child-class" placeholder="Наприклад: 5-А"></div>
       <div class="field"><label>Колір</label><input type="color" id="child-color" value="#4c8df6"></div>
       <div class="row">
         <button class="btn primary" id="btn-save-child">Зберегти</button>
@@ -72,8 +72,8 @@
   <div class="modal" id="modal-cell" hidden>
     <div class="modal__card">
       <h2 id="cell-title">Предмет</h2>
-      <div class="field"><label>Предмет / занятія</label><input type="text" id="cell-subject" placeholder="Наприм: Математика"></div>
-      <div class="field"><label>Кабінет / вчитель (опціонально)</label><input type="text" id="cell-room" placeholder="Наприм: 302"></div>
+      <div class="field"><label>Предмет / урок</label><input type="text" id="cell-subject" placeholder="Наприклад: Математика"></div>
+      <div class="field"><label>Кабінет / вчитель (необов'язково)</label><input type="text" id="cell-room" placeholder="Наприклад: 302"></div>
       <div class="row">
         <button class="btn primary" id="btn-save-cell">Зберегти</button>
         <button class="btn danger" id="btn-clear-cell">Очистити</button>
@@ -82,11 +82,11 @@
     </div>
   </div>
 
-  <!-- Редакт часів уроків -->
+  <!-- Редагування дзвінків / розкладу уроків -->
   <div class="modal" id="modal-slots" hidden>
     <div class="modal__card">
-      <h2 id="slot-title">Часі уроків</h2>
-      <p class="muted">По одному рядку на урок. Формат: номер|початок-кінец, наприклад 1|08:00-08:45.</p>
+      <h2 id="slot-title">Розклад дзвінків</h2>
+      <p class="muted">По одному рядку на урок. Формат: номер|початок-кінець, наприклад 1|08:00-08:45.</p>
       <textarea id="slot-textarea" rows="9" spellcheck="false" style="width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px;font-family:monospace;font-size:14px;resize:vertical"></textarea>
       <div class="row" style="margin-top:10px">
         <button class="btn primary" id="btn-save-slots">Зберегти</button>
@@ -95,13 +95,13 @@
     </div>
   </div>
 
-  <!-- Редакт пунктів -->
+  <!-- Редагування завдань / контрольних -->
   <div class="modal" id="modal-item" hidden>
     <div class="modal__card">
-      <h2 id="item-title">Пункт</h2>
+      <h2 id="item-title">Запис</h2>
       <div class="item-form">
-        <input type="text" id="item-subject" placeholder="Предмет / занятія">
-        <input type="text" id="item-text" placeholder="Текст (домашка / детали)">
+        <input type="text" id="item-subject" placeholder="Предмет">
+        <input type="text" id="item-text" placeholder="Опис (завдання / тема)">
         <div class="row">
           <input type="date" id="item-date" style="flex:1">
           <input type="text" id="item-extra" style="flex:1">
@@ -115,10 +115,10 @@
     </div>
   </div>
 
-  <!-- Підтверження -->
+  <!-- Підтвердження -->
   <div class="modal" id="modal-confirm" hidden>
     <div class="modal__card">
-      <h2>Підтверження</h2>
+      <h2>Підтвердження</h2>
       <p class="muted" id="confirm-msg"></p>
       <div class="row">
         <button class="btn danger" id="btn-confirm-ok">ОК</button>
