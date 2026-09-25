@@ -4,6 +4,8 @@
   --line:#24304a;--accent:#4c8df6;--ok:#2fbf71;--warn:#e6a23c;--err:#e5484d;
   --radius:14px;--shadow:0 8px 24px rgba(0,0,0,.5);
 }
+[hidden]{display:none !important}
+
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:15px;-webkit-tap-highlight-color:transparent}
