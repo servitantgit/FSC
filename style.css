@@ -17,13 +17,13 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .topbar__right{display:flex;align-items:center;gap:10px;margin-left:auto}
 .icon-btn{width:38px;height:38px;border-radius:10px;background:transparent;border:1px solid var(--line);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
 .icon-btn:hover{background:var(--panel2)}
-.ic{width:20px;height:20px}
 
 .sync-indicator{width:12px;height:12px;border-radius:50%;background:var(--muted)}
 .sync-indicator.sync-ok{background:var(--ok);box-shadow:0 0 0 3px rgba(47,191,113,.25)}
 .sync-indicator.sync-off{background:var(--muted)}
 .sync-indicator.sync-err{background:var(--err)}
 .sync-indicator.sync-busy{background:var(--warn)}
+.sync-indicator.sync-local{background:var(--accent);box-shadow:0 0 0 3px rgba(76,141,246,.25)}
 
 .child-tabs{display:flex;flex-wrap:wrap;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px}
 .child-tab{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;font-weight:600}
@@ -46,7 +46,6 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .sched-table td.time-cell .slot-num{font-weight:700;margin-right:4px}
 .sched-table td.time-cell .slot-hours{color:var(--muted);font-size:11px;display:block}
 
-/* Lesson card styling */
 .lesson-card{display:flex;flex-direction:column;justify-content:center;min-height:56px;height:100%;width:100%;padding:7px 10px;border-radius:8px;border:1px solid rgba(0,0,0,0.15);cursor:grab;user-select:none;text-align:left;position:relative;transition:transform .12s ease,box-shadow .12s ease,opacity .15s ease}
 .lesson-card:hover{filter:brightness(1.06);box-shadow:0 3px 10px rgba(0,0,0,0.25)}
 .lesson-card:active{cursor:grabbing}
@@ -57,11 +56,9 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .lesson-empty{display:flex;align-items:center;justify-content:center;min-height:56px;height:100%;width:100%;border-radius:8px;border:1px dashed var(--line);background:transparent;color:var(--muted);cursor:pointer;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;transition:background .15s ease,border-color .15s ease}
 .lesson-empty:hover{background:var(--panel2);border-color:var(--accent);color:var(--text)}
 
-/* Drag and Drop targets */
 .cell-slot{height:100%;min-height:56px;border-radius:8px;position:relative}
 .cell-slot.drag-over{outline:2px dashed var(--accent);outline-offset:-2px;background:rgba(76,141,246,0.15);border-radius:8px}
 
-/* Color palette picker in modal */
 .color-palette{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
 .color-swatch{width:28px;height:28px;border-radius:7px;border:2px solid transparent;cursor:pointer;transition:transform .12s ease}
 .color-swatch:hover{transform:scale(1.15)}
@@ -80,6 +77,7 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .btn.danger{background:transparent;color:var(--err);border-color:var(--err)}
 .btn.ghost{background:transparent;color:var(--text)}
 .row{display:flex;gap:10px;flex-wrap:wrap}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
 .field{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
 .field label{font-size:12px;color:var(--muted)}
 .field input{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:9px 11px;font-size:15px}
@@ -100,22 +98,20 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
 
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:70;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal__card{width:min(480px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;max-height:90vh;overflow:auto}
+.modal__card--wide{width:min(580px,96vw)}
+.modal__card code{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.steps{margin:10px 0 14px;padding-left:20px;color:var(--text);font-size:14px;line-height:1.55}
+.steps li{margin-bottom:4px}
 
 .empty{background:var(--panel);border:1px dashed var(--line);border-radius:var(--radius);padding:26px;color:var(--muted);text-align:center}
 
-@media (min-width:860px){
-  .app{padding:0 24px 30px}
-}
 .list{display:flex;flex-direction:column;gap:8px}
 .list-item{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
 .list-item .bar{width:4px;align-self:stretch;background:currentColor;border-radius:2px}
 .list-item .txt{flex:1}
 .list-item .meta{color:var(--muted);font-size:12px}
 .add-btn{width:100%;padding:9px;border:1px dashed var(--line);background:transparent;color:var(--accent);border-radius:10px;cursor:pointer;margin-top:6px}
-/* Modal Wide variant */
-.modal__card--wide{width:min(580px,96vw)}
 
-/* Slots modal styles */
 .slots-subtitle{font-size:13px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);margin:14px 0 8px}
 .slots-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
 .slot-row{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
@@ -126,7 +122,6 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
 .slot-row input[type="text"].slot-label{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;min-width:110px}
 .slot-dash{color:var(--muted);font-weight:600}
 
-/* Schedule table extra rows */
 .sched-table tr.extra-row td{padding-top:2px}
 .sched-table tr.extra-row .time-cell{background:rgba(230,162,60,0.08);border-color:rgba(230,162,60,0.25)}
 .sched-table tr.extra-row .time-cell .slot-num{color:var(--warn)}
@@ -135,3 +130,10 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
 .sched-table tr.extra-row .lesson-empty.extra-add{border-color:rgba(230,162,60,0.3);color:rgba(230,162,60,0.85);background:rgba(230,162,60,0.03)}
 .sched-table tr.extra-row .lesson-empty.extra-add:hover{background:rgba(230,162,60,0.12);border-color:var(--warn);color:#fff}
 .sched-table tr.extra-row .lesson-card.extra-card{border:1.5px solid rgba(230,162,60,0.5);box-shadow:0 3px 8px rgba(230,162,60,0.15)}
+
+.update-toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--accent);border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow);z-index:80;font-size:14px}
+.update-toast button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:600}
+
+@media (min-width:860px){
+  .app{padding:0 24px 30px}
+}

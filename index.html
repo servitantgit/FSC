@@ -16,7 +16,7 @@
         <h1 class="topbar__title">Розклад уроків</h1>
       </div>
       <div class="topbar__right">
-        <span class="sync-indicator" id="sync-indicator" title="Стан синхронізації"></span>
+        <span class="sync-indicator" id="sync-indicator" title="Стан даних"></span>
         <button class="icon-btn" id="btn-add-child" title="Додати дитину">＋</button>
       </div>
     </header>
@@ -26,8 +26,9 @@
     <main class="content" id="content"></main>
 
     <div class="footer-actions">
-      <button class="btn ghost" id="btn-export">Експорт JSON</button>
+      <button class="btn primary" id="btn-export">Експорт JSON</button>
       <button class="btn ghost" id="btn-import">Імпорт JSON</button>
+      <button class="btn ghost" id="btn-reload-remote">Оновити з сервера</button>
       <input type="file" id="import-file" accept=".json,application/json" hidden>
     </div>
   </div>
@@ -37,22 +38,6 @@
     <button class="icon-btn sidebar__close" id="btn-sidebar-close">✕</button>
     <nav class="sidebar__nav" id="sidebar-nav"></nav>
   </aside>
-
-  <!-- Налаштування Gist -->
-  <div class="modal" id="modal-settings" hidden>
-    <div class="modal__card">
-      <h2>Синхронізація через Gist</h2>
-      <p class="muted">Дані зберігаються у вашому secret Gist на GitHub. Усі пристрої (телефон, ноутбук) читають і записують в нього, завдяки чому розклад синхронізується.</p>
-      <div class="field"><label>Gist ID</label><input type="text" id="set-gist-id" placeholder="Наприклад: 1a2b3c4d5e6f7g8h" autocomplete="off"></div>
-      <div class="field"><label>GitHub token (scope «gist»)</label><input type="password" id="set-token" placeholder="github_pat_…" autocomplete="off"></div>
-      <div class="row">
-        <button class="btn primary" id="btn-save-settings">Зберегти</button>
-        <button class="btn ghost" id="btn-clear-sync">Вимкнути синхронізацію</button>
-      </div>
-      <p class="status" id="settings-status"></p>
-      <p class="muted small">Токен зберігається лише локально (localStorage) і надсилається виключно на api.github.com.</p>
-    </div>
-  </div>
 
   <!-- Додавання дитини -->
   <div class="modal" id="modal-child" hidden>
@@ -83,9 +68,7 @@
       </div>
       <div class="field">
         <label>Колір предмета (застосується до всіх уроків цього предмета)</label>
-        <div class="color-palette" id="cell-palette">
-          <!-- Кнопки швидкого вибору кольору -->
-        </div>
+        <div class="color-palette" id="cell-palette"></div>
         <div class="custom-color-row">
           <input type="color" id="cell-color" value="#ffcf44">
           <span class="muted small">Обрати власний колір</span>
@@ -99,11 +82,11 @@
     </div>
   </div>
 
-  <!-- Редагування дзвінків / розкладу уроків -->
+  <!-- Редагування дзвінків -->
   <div class="modal" id="modal-slots" hidden>
     <div class="modal__card modal__card--wide">
       <h2 id="slot-title">Розклад дзвінків</h2>
-      <p class="muted">8 уроків + 2 додаткові заняття (гурток / тренування) на кожен день — всього 10 рядків.</p>
+      <p class="muted">8 уроків + 2 додаткові заняття (гурток / тренування) на кожен день — усього 10 рядків.</p>
       <h3 class="slots-subtitle">Уроки 1–8</h3>
       <div class="slots-list" id="slot-lessons-list"></div>
       <h3 class="slots-subtitle">Додаткові заняття (довільний час)</h3>
@@ -129,8 +112,26 @@
         <span class="muted small" id="item-extra-label"></span>
         <div class="btn-row">
           <button class="btn primary" id="btn-save-item">Зберегти</button>
+          <button class="btn danger" id="btn-delete-item">Видалити</button>
           <button class="btn ghost" id="btn-cancel-item">Скасувати</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Інформація про експорт -->
+  <div class="modal" id="modal-export-info" hidden>
+    <div class="modal__card">
+      <h2>Як опублікувати зміни</h2>
+      <p class="muted">Файл <code>schedule.json</code> завантажено у ваші «Завантаження».</p>
+      <ol class="steps">
+        <li>Відкрийте репозиторій на GitHub.</li>
+        <li>Замініть файл <code>schedule.json</code> у корені репозиторію на щойно завантажений.</li>
+        <li>Зробіть commit (пуш у гілку <code>main</code>).</li>
+        <li>Через 1–2 хвилини оновіть сторінку — Service Worker підхопить нову версію.</li>
+      </ol>
+      <div class="row">
+        <button class="btn primary" id="btn-export-info-ok">Зрозуміло</button>
       </div>
     </div>
   </div>

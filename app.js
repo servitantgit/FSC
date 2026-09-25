@@ -1,30 +1,50 @@
 /* ============================================================
-   Family School Web - dziecy rozklad
-   Statyczny serwis dla GitHub Pages + GitHub Gist synchronizacja
+   Family School Web — дитячий розклад
+   Статичний застосунок для GitHub Pages
+   Читання: schedule.json з того ж домену (публічно)
+   Редагування: локально в localStorage
+   Публікація: експорт JSON → пуш у репозиторій
    ============================================================ */
 'use strict';
 
-/* ---------- Konstancje ---------- */
+/* ---------- Константи ---------- */
 const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
-const DAY_SHORT = {mon:"Пн",tue:"Вт",wed:"Ср",thu:"Чт",fri:"Пт",sat:"Сб",sun:"Нд"};
-const DAY_FULL  = {mon:"Понеділок",tue:"Вівторок",wed:"Середа",thu:"Четвер",fri:"П'ятниця",sat:"Субота",sun:"Неділя"};
+const DAY_FULL = {mon:"Понеділок",tue:"Вівторок",wed:"Середа",thu:"Четвер",fri:"П'ятниця",sat:"Субота",sun:"Неділя"};
 const LS_DATA = "fsc.data.v1";
-const LS_SETTINGS = "fsc.settings.v1";
-const GIST_FILENAME = "schedule.json";
-const GIST_API = "https://api.github.com";
+const LS_DIRTY = "fsc.dirty.v1";
+const REMOTE_FILE = "schedule.json";
 
-/* Палітра предметів як на малюнку */
 const SUBJECT_PALETTE = ["#ffcf44","#38c6f4","#c9a6f2","#ff8c42","#ff6b6b","#7ee081","#4c8df6","#ff9ff3","#2fbf71","#ffd32a","#ffa502","#eccc68"];
 const DEFAULT_SUBJECT_COLOR = "#ffd166";
 
-/* ---------- Нормалізація назв предметів ---------- */
+const LESSON_COUNT = 8;
+const EXTRA_COUNT = 2;
+const TOTAL_ROWS = LESSON_COUNT + EXTRA_COUNT;
+
+/* ---------- Стан ---------- */
+const state = {
+  data: { version: 1, children: [] },
+  activeChildId: null,
+  hasLocalChanges: false
+};
+
+/* ---------- Утиліти ---------- */
+const $ = (s, r) => (r || document).querySelector(s);
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+function esc(s){ return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function todayISO(){
+  const d = new Date();
+  const p = n => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate());
+}
+
+/* ---------- Кольори предметів ---------- */
 function normSubject(s){ return String(s || "").trim().toLowerCase(); }
 function getSubjectColor(child, subject){
   if (!child) return DEFAULT_SUBJECT_COLOR;
   if (!child.subjectColors) child.subjectColors = {};
   const key = normSubject(subject);
   if (key && child.subjectColors[key]) return child.subjectColors[key].color || DEFAULT_SUBJECT_COLOR;
-  // зворотна сумісність: колір міг лежати в картці
   return DEFAULT_SUBJECT_COLOR;
 }
 function setSubjectColor(child, subject, color){
@@ -52,30 +72,12 @@ function collectSubjects(child){
 function autoColorFor(child, subject){
   const key = normSubject(subject);
   if (child.subjectColors && child.subjectColors[key]) return child.subjectColors[key].color;
-  // призначити перший вільний колір з палітри
   const used = new Set(Object.values(child.subjectColors || {}).map(e => e.color));
   const free = SUBJECT_PALETTE.find(c => !used.has(c));
   return free || SUBJECT_PALETTE[Object.keys(child.subjectColors || {}).length % SUBJECT_PALETTE.length];
 }
 
-/* ---------- Stan aplikacji ---------- */
-const state = {
-  data: { version: 1, children: [] },
-  settings: { token: "", gistId: "" },
-  activeChildId: null
-};
-
-/* ---------- Pomocnicze ---------- */
-const $ = (s, r) => (r || document).querySelector(s);
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-function todayKey(){ const d = new Date(); return DAYS[(d.getDay() + 6) % 7]; }
-function esc(s){ return String(s || "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-function todayISO(){ const d = new Date(); const p = n => String(n).padStart(2, "0"); return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate()); }
-
-const LESSON_COUNT = 8;
-const EXTRA_COUNT = 2;
-const TOTAL_ROWS = LESSON_COUNT + EXTRA_COUNT;
-
+/* ---------- Дефолтні дзвінки ---------- */
 function defaultLessonSlots(){
   return [
     { num: "1", label: "", start: "08:00", end: "08:45" },
@@ -94,10 +96,9 @@ function defaultExtraSlots(){
     { num: "★2", label: "Гурток 2", start: "17:15", end: "18:15" }
   ];
 }
-function defaultSlots(){
-  return defaultLessonSlots().concat(defaultExtraSlots());
-}
+function defaultSlots(){ return defaultLessonSlots().concat(defaultExtraSlots()); }
 function isExtraRow(i){ return i >= LESSON_COUNT; }
+
 function normalizeSlots(slots){
   const list = Array.isArray(slots) ? slots.map(s => ({
     num: String(s && (s.num !== undefined && s.num !== null ? s.num : (s.label !== undefined && s.label !== null ? s.label : ""))),
@@ -149,104 +150,131 @@ function newChild(name){
     homework: [], exams: []
   };
 }
-/* ---------- Warstwy przechowywania ---------- */
+function normalizeData(data){
+  if (!data || typeof data !== "object") data = { version: 1, children: [] };
+  if (!Array.isArray(data.children)) data.children = [];
+  data.children.forEach(ch => {
+    if (!ch.subjectColors) ch.subjectColors = {};
+    ch.slots = normalizeSlots(ch.slots);
+    if (!ch.days) ch.days = emptyDayObject();
+    DAYS.forEach(d => { ch.days[d] = normalizeDay(ch.days[d]); });
+    // Міграція: колір із картки → subjectColors
+    DAYS.forEach(d => {
+      (ch.days[d] || []).forEach(v => {
+        if (v && v.subject && v.color){
+          const k = normSubject(v.subject);
+          if (k && !ch.subjectColors[k]) ch.subjectColors[k] = { name: v.subject.trim(), color: v.color };
+        }
+      });
+    });
+    if (!Array.isArray(ch.homework)) ch.homework = [];
+    if (!Array.isArray(ch.exams)) ch.exams = [];
+  });
+  return data;
+}
+
+/* ---------- Індикатор стану ---------- */
+function setSync(cls, title){
+  const el = $("#sync-indicator");
+  if (!el) return;
+  el.className = "sync-indicator sync-" + cls;
+  el.title = title || "";
+}
+function refreshIndicator(){
+  if (state.hasLocalChanges) setSync("local", "Є локальні зміни — експортуйте JSON і опублікуйте");
+  else setSync("ok", "Дані з сервера");
+}
+
+/* ---------- Сховище ---------- */
 function loadLocal(){
   try {
     const raw = localStorage.getItem(LS_DATA);
-    if (raw) state.data = JSON.parse(raw);
-    const s = localStorage.getItem(LS_SETTINGS);
-    if (s) state.settings = JSON.parse(s);
-    migrateSubjectColors();
-  } catch (e) { console.error("local load", e); }
+    if (raw) state.data = normalizeData(JSON.parse(raw));
+    state.hasLocalChanges = localStorage.getItem(LS_DIRTY) === "1";
+  } catch (e) {
+    console.error("Помилка читання localStorage:", e);
+  }
 }
-function migrateSubjectColors(){
-  try {
-    (state.data.children || []).forEach(ch => {
-      if (!ch.subjectColors) ch.subjectColors = {};
-      DAYS.forEach(d => {
-        (ch.days[d] || []).forEach(v => {
-          if (v && v.subject && v.color){
-            const k = normSubject(v.subject);
-            if (k && !ch.subjectColors[k]) ch.subjectColors[k] = { name: v.subject.trim(), color: v.color };
-          }
-        });
-      });
-    });
-  } catch(_){}
-}
-function saveLocal(){
+function saveLocal(markDirty){
   try {
     localStorage.setItem(LS_DATA, JSON.stringify(state.data));
-    localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings));
-  } catch (e) { console.error("local save", e); }
+    if (markDirty){
+      state.hasLocalChanges = true;
+      localStorage.setItem(LS_DIRTY, "1");
+    }
+  } catch (e) {
+    console.error("Помилка запису localStorage:", e);
+  }
+}
+function clearDirty(){
+  state.hasLocalChanges = false;
+  localStorage.removeItem(LS_DIRTY);
 }
 
-function setSync(cls, title){ const el = $("#sync-indicator"); if (!el) return; el.className = "sync-indicator sync-" + cls; el.title = title || ""; }
-
-async function gistFetch(){
-  if (!state.settings.gistId) return null;
-  const h = { Accept: "application/vnd.github+json", "User-Agent": "fsc-web" };
-  if (state.settings.token) h.Authorization = "Bearer " + state.settings.token;
-  const r = await fetch(GIST_API + "/gists/" + state.settings.gistId, { headers: h });
-  if (r.status === 404) return "missing";
-  if (!r.ok) return null;
-  const g = await r.json();
-  const f = Object.values(g.files)[0];
-  if (f && f.content){ try { return JSON.parse(f.content); } catch (e) { return "corrupt"; } }
-  return null;
-}
-
-async function gistPush(data){
-  const body = {
-    description: "Family School Web - rozklad dzieci",
-    public: false,
-    files: { [GIST_FILENAME]: { content: JSON.stringify(data, null, 2) } }
-  };
-  const h = { "Content-Type": "application/json", Accept: "application/vnd.github+json", "User-Agent": "fsc-web" };
-  if (state.settings.token) h.Authorization = "Bearer " + state.settings.token;
-  let url = GIST_API + "/gists", method = "POST";
-  if (state.settings.gistId){ url += "/" + state.settings.gistId; method = "PATCH"; }
-  const r = await fetch(url, { method, headers: h, body: JSON.stringify(body) });
-  if (!r.ok) return null;
-  const g = await r.json();
-  return g.id;
+async function fetchRemote(){
+  try {
+    // ?v=timestamp щоб оминути кеш браузера при явному запиті
+    const res = await fetch(REMOTE_FILE + "?v=" + Date.now(), { cache: "no-cache" });
+    if (!res.ok) return null;
+    const parsed = await res.json();
+    return normalizeData(parsed);
+  } catch (e) {
+    console.warn("Не вдалося прочитати " + REMOTE_FILE + ":", e);
+    return null;
+  }
 }
 
 async function loadAll(){
   loadLocal();
-  let remote = null;
-  if (state.settings.gistId){
-    setSync("busy", "Завантаження з Gist…");
-    remote = await gistFetch();
-    if (remote && remote !== "missing" && remote !== "corrupt") state.data = remote;
+
+  // Якщо є локальні зміни — не перетираємо їх серверною версією
+  if (state.hasLocalChanges && state.data.children.length){
+    if (!state.activeChildId) state.activeChildId = state.data.children[0].id;
+    refreshIndicator();
+    renderAll();
+    return;
+  }
+
+  setSync("busy", "Завантаження розкладу…");
+  const remote = await fetchRemote();
+  if (remote){
+    state.data = remote;
+    saveLocal(false);
   }
   if (!state.data.children) state.data.children = [];
-  state.data.children.forEach(ch => {
-    ch.slots = normalizeSlots(ch.slots);
-    if (!ch.days) ch.days = emptyDayObject();
-    DAYS.forEach(d => { ch.days[d] = normalizeDay(ch.days[d]); });
-  });
   if (!state.activeChildId && state.data.children.length) state.activeChildId = state.data.children[0].id;
-  syncIndicator();
+  refreshIndicator();
   renderAll();
-  if (remote === "corrupt") setSync("err", "Gist пошкоджено — дані завантажено локально");
-  return remote;
 }
 
-async function saveAll(){
-  saveLocal();
-  if (state.settings.gistId){
-    setSync("busy", "Збереження в Gist…");
-    const id = await gistPush(state.data);
-    if (id){ state.settings.gistId = id; saveLocal(); setSync("ok", "Синхронізація активна"); }
-    else setSync("err", "Не вдалося зберегти — перевірте токен або Gist ID");
-  } else {
-    setSync("off", "Gist не налаштовано — дані лише локально");
-  }
+async function reloadFromRemote(){
+  confirmAsync("Оновити дані з сервера? Ваші локальні незбережені зміни буде втрачено.", async () => {
+    setSync("busy", "Завантаження…");
+    const remote = await fetchRemote();
+    if (remote){
+      state.data = remote;
+      state.activeChildId = state.data.children.length ? state.data.children[0].id : null;
+      clearDirty();
+      saveLocal(false);
+      refreshIndicator();
+      renderAll();
+    } else {
+      setSync("err", "Не вдалося завантажити " + REMOTE_FILE);
+      setTimeout(refreshIndicator, 2500);
+    }
+  });
 }
 
-function syncIndicator(){ state.settings.gistId ? setSync("ok", "Синхронізація активна") : setSync("off", "Gist не налаштовано"); }
-/* ============ Renderowanie ============ */
+function markChanged(){
+  saveLocal(true);
+  refreshIndicator();
+}
+function saveAndRender(){
+  markChanged();
+  renderAll();
+}
+
+/* ============ Рендеринг ============ */
 function activeChild(){ return state.data.children.find(c => c.id === state.activeChildId); }
 function renderAll(){ renderChildTabs(); renderToolbar(); renderContent(); }
 
@@ -265,7 +293,7 @@ function renderChildTabs(){
     const b = document.createElement("button");
     b.className = "child-tab" + (c.id === state.activeChildId ? " active" : "");
     b.innerHTML = '<span class="dot" style="color:' + esc(c.color) + '"></span><span>' + esc(c.name) + "</span>";
-    const x = mk("span", "x", "x");
+    const x = mk("span", "x", "×");
     x.addEventListener("click", e => { e.stopPropagation(); delChild(c.id); });
     b.appendChild(x);
     b.addEventListener("click", () => { state.activeChildId = c.id; renderAll(); });
@@ -302,6 +330,7 @@ function renderContent(){
   wrap.appendChild(renderListCard(child, "exams", "Контрольні та іспити"));
   main.appendChild(wrap);
 }
+
 function renderSchedule(child){
   if (!child.subjectColors) child.subjectColors = {};
   const card = mk("div", "card");
@@ -347,7 +376,7 @@ function renderSchedule(child){
         lesson.title = (val.subject || "") + (val.room ? " • " + val.room : "") + " — тягніть щоб перемістити";
         const s1 = document.createElement("div"); s1.className = "lesson-subject"; s1.textContent = val.subject || "—";
         lesson.appendChild(s1);
-        if (val.room){ const s2 = document.createElement("div"); s2.className = "lesson-room"; s2.textContent = "—" + val.room; lesson.appendChild(s2); }
+        if (val.room){ const s2 = document.createElement("div"); s2.className = "lesson-room"; s2.textContent = "— " + val.room; lesson.appendChild(s2); }
         lesson.addEventListener("click", () => openCellEditor(child.id, d, si));
         lesson.addEventListener("dragstart", e => {
           e.dataTransfer.setData("text/plain", JSON.stringify({ day: d, slot: si }));
@@ -365,7 +394,6 @@ function renderSchedule(child){
         empty.addEventListener("click", () => openCellEditor(child.id, d, si));
         slotBox.appendChild(empty);
       }
-      // drop-цілі
       slotBox.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; slotBox.classList.add("drag-over"); });
       slotBox.addEventListener("dragleave", () => slotBox.classList.remove("drag-over"));
       slotBox.addEventListener("drop", e => {
@@ -406,17 +434,17 @@ function renderListCard(child, kind, title){
     const bar = mk("span", "bar"); bar.style.background = child.color;
     const txt = mk("span", "txt"); const meta = mk("span", "meta");
     if (kind === "homework"){
-      txt.textContent = (it.subject ? it.subject + " - " : "") + (it.text || "");
-      meta.textContent = (it.date || "") + (it.class ? " . " + it.class : "");
+      txt.textContent = (it.subject ? it.subject + " — " : "") + (it.text || "");
+      meta.textContent = (it.date || "") + (it.class ? " • " + it.class : "");
       const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = !!it.done;
       toggle.addEventListener("change", () => { it.done = toggle.checked; saveAndRender(); });
       row.appendChild(toggle);
     } else {
-      txt.textContent = (it.subject || "") + (it.text ? " - " + it.text : "");
-      meta.textContent = (it.date || "") + (it.room ? " . " + it.room : "");
+      txt.textContent = (it.subject || "") + (it.text ? " — " + it.text : "");
+      meta.textContent = (it.date || "") + (it.room ? " • " + it.room : "");
     }
     row.appendChild(bar); row.appendChild(txt); row.appendChild(meta);
-    row.appendChild(mk("button", "btn ghost", "...", () => openItemEditor(kind, it)));
+    row.appendChild(mk("button", "btn ghost", "…", () => openItemEditor(kind, it)));
     list.appendChild(row);
   });
   card.appendChild(list);
@@ -424,13 +452,7 @@ function renderListCard(child, kind, title){
   return card;
 }
 
-function tint(hex, alpha){
-  try {
-    const n = parseInt(hex.slice(1), 16); const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-    return "rgba(" + r + "," + g + "," + b + "," + (alpha || 0.28) + ")";
-  } catch (e) { return hex; }
-}
-/* ============ Edytory (modale) ============ */
+/* ============ Модальні вікна ============ */
 function show(id){ const m = $("#" + id); if (m) m.hidden = false; }
 function hide(id){ const m = $("#" + id); if (m) m.hidden = true; }
 function focusField(id){ const f = $("#" + id); if (f && f.select) f.select(); }
@@ -470,16 +492,17 @@ function openCellEditor(childId, day, slotIdx){
   $("#cell-title").textContent = DAY_FULL[day] + " • " + (slot.start) + "–" + (slot.end);
   $("#cell-subject").value = val.subject || "";
   $("#cell-room").value = val.room || "";
-  // datalist існуючих предметів
   const dl = $("#subjects-datalist"); if (dl){ dl.innerHTML = ""; collectSubjects(child).forEach(n => { const o = document.createElement("option"); o.value = n; dl.appendChild(o); }); }
   const cur = val.color || (val.subject ? getSubjectColor(child, val.subject) : autoColorFor(child, $("#cell-subject").value));
   buildPalette(child, cur);
-  // якщо користувач вводить відомий предмет — підставити його колір
   $("#cell-subject").oninput = e => {
     const name = e.target.value;
     const k = normSubject(name);
-    if (child.subjectColors[k]){ cellColorSel = child.subjectColors[k].color; const cc=$("#cell-color"); if(cc) cc.value=cellColorSel;
-      document.querySelectorAll("#cell-palette .color-swatch").forEach(x => x.classList.toggle("active", x.title === cellColorSel)); }
+    if (child.subjectColors[k]){
+      cellColorSel = child.subjectColors[k].color;
+      const cc = $("#cell-color"); if (cc) cc.value = cellColorSel;
+      document.querySelectorAll("#cell-palette .color-swatch").forEach(x => x.classList.toggle("active", x.title === cellColorSel));
+    }
   };
   show("modal-cell"); focusField("cell-subject");
 }
@@ -490,7 +513,7 @@ function commitCell(){
   const subject = $("#cell-subject").value.trim();
   const room = $("#cell-room").value.trim();
   const color = cellColorSel || $("#cell-color").value;
-  if (subject) setSubjectColor(child, subject, color); // наслідування: всі картки тижня з цим предметом стануть цього кольору
+  if (subject) setSubjectColor(child, subject, color);
   child.days[cellCtx.day][cellCtx.slotIdx] = (subject || room) ? { subject, room, color } : null;
   hide("modal-cell"); cellCtx = null; saveAndRender();
 }
@@ -501,7 +524,7 @@ function clearCell(){
   hide("modal-cell"); cellCtx = null; saveAndRender();
 }
 
-/* --- Godziny lekcji --- */
+/* --- Дзвінки --- */
 let slotCtx = null;
 function openSlotEditor(){
   const child = activeChild(); if (!child) return;
@@ -531,10 +554,8 @@ function openSlotEditor(){
     </div>
   `).join("");
 
-  const lList = $("#slot-lessons-list");
-  if (lList) lList.innerHTML = lessonsHtml;
-  const eList = $("#slot-extras-list");
-  if (eList) eList.innerHTML = extrasHtml;
+  const lList = $("#slot-lessons-list"); if (lList) lList.innerHTML = lessonsHtml;
+  const eList = $("#slot-extras-list"); if (eList) eList.innerHTML = extrasHtml;
 
   show("modal-slots");
 }
@@ -542,20 +563,17 @@ function commitSlots(){
   if (!slotCtx) return;
   const newSlots = [];
 
-  const lessonRows = document.querySelectorAll("#slot-lessons-list .slot-row");
-  lessonRows.forEach((row, i) => {
+  document.querySelectorAll("#slot-lessons-list .slot-row").forEach((row, i) => {
     const st = row.querySelector(".slot-start");
     const en = row.querySelector(".slot-end");
     newSlots.push({
-      num: String(i + 1),
-      label: "",
+      num: String(i + 1), label: "",
       start: (st && st.value) || "08:00",
       end: (en && en.value) || "08:45"
     });
   });
 
-  const extraRows = document.querySelectorAll("#slot-extras-list .slot-row");
-  extraRows.forEach((row, i) => {
+  document.querySelectorAll("#slot-extras-list .slot-row").forEach((row, i) => {
     const lbl = row.querySelector(".slot-label");
     const st = row.querySelector(".slot-start");
     const en = row.querySelector(".slot-end");
@@ -571,7 +589,8 @@ function commitSlots(){
   DAYS.forEach(d => { slotCtx.days[d] = normalizeDay(slotCtx.days[d]); });
   hide("modal-slots"); slotCtx = null; saveAndRender();
 }
-/* --- Element (praca domowa / sprawdzian) --- */
+
+/* --- Домашка / контрольна --- */
 let itemCtx = { kind: null, childId: null, item: null };
 function openItemEditor(kind, item){
   const child = activeChild(); if (!child) return;
@@ -581,10 +600,11 @@ function openItemEditor(kind, item){
   $("#item-subject").value = (item && item.subject) || "";
   $("#item-text").value = (item && item.text) || "";
   $("#item-date").value = (item && item.date) || todayISO();
-  $("#item-extra").value = (item && isHw ? item.class : item.room) || (isHw ? "" : "");
+  $("#item-extra").value = (item && (isHw ? item.class : item.room)) || "";
   $("#item-extra").placeholder = isHw ? "Клас / примітка" : "Кабінет";
   $("#item-extra-label").textContent = isHw ? "Клас або примітка (необов'язково)" : "Кабінет (необов'язково)";
-  $("#item-extra").hidden = false;
+  const delBtn = $("#btn-delete-item");
+  if (delBtn) delBtn.hidden = !item;
   show("modal-item"); focusField("item-subject");
 }
 function commitItem(){
@@ -607,8 +627,19 @@ function commitItem(){
   }
   hide("modal-item"); itemCtx = { kind: null, childId: null, item: null }; saveAndRender();
 }
+function deleteItem(){
+  if (!itemCtx || !itemCtx.item || !itemCtx.childId) return;
+  const child = state.data.children.find(c => c.id === itemCtx.childId);
+  if (!child){ hide("modal-item"); return; }
+  const kind = itemCtx.kind;
+  const targetId = itemCtx.item.id;
+  confirmAsync("Видалити цей запис безповоротно?", () => {
+    child[kind] = (child[kind] || []).filter(x => x.id !== targetId);
+    hide("modal-item"); itemCtx = { kind: null, childId: null, item: null }; saveAndRender();
+  });
+}
 
-/* --- Dodawanie / usuwanie dziecka --- */
+/* --- Діти --- */
 function openChildModal(){
   $("#modal-child-title").textContent = "Нова дитина";
   $("#child-name").value = ""; $("#child-class").value = ""; $("#child-color").value = "#4c8df6";
@@ -620,7 +651,7 @@ function saveChild(){
   c.color = $("#child-color").value;
   state.data.children.push(c);
   state.activeChildId = c.id;
-  hide("modal-child"); saveAll(); renderAll();
+  hide("modal-child"); saveAndRender();
 }
 function delChild(id){
   const c = state.data.children.find(x => x.id === id) || {};
@@ -631,52 +662,50 @@ function delChild(id){
   });
 }
 
-/* --- Potwierdzenie --- */
+/* --- Підтвердження --- */
 let confirmCb = null;
 function confirmAsync(msg, onOk){
   $("#confirm-msg").textContent = msg;
   confirmCb = onOk;
   show("modal-confirm");
 }
-/* ============ Ustawienia Gist ============ */
-function openSettings(){
-  $("#set-gist-id").value = state.settings.gistId || "";
-  $("#set-token").value = state.settings.token || "";
-  $("#settings-status").textContent = state.settings.gistId ? "Gist налаштовано (…" + state.settings.gistId.slice(-8) + ")" : "Gist не налаштовано — дані лише локально";
-  show("modal-settings");
-}
-function saveSettings(){
-  state.settings.gistId = $("#set-gist-id").value.trim();
-  state.settings.token = $("#set-token").value.trim();
-  saveLocal(); saveAll();
-  $("#settings-status").textContent = "Збережено. Синхронізація…";
-}
 
-/* ============ Eksport / import ============ */
+/* ============ Експорт / імпорт ============ */
 function doExport(){
   const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob); a.download = "family-schedule.json"; a.click();
+  a.href = URL.createObjectURL(blob);
+  a.download = REMOTE_FILE;
+  a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  show("modal-export-info");
 }
 function doImport(file){
   if (!file) return;
   file.text().then(text => {
     try {
       const parsed = JSON.parse(text);
-      if (parsed && Array.isArray(parsed.children)){ state.data = parsed; saveAndRender(); alert("Імпорт успішно завершено ✔"); }
-      else alert("Некоректний формат файлу — відсутнє поле «children».");
-    } catch (e){ alert("Помилка читання JSON: " + e.message); }
+      if (parsed && Array.isArray(parsed.children)){
+        state.data = normalizeData(parsed);
+        state.activeChildId = state.data.children.length ? state.data.children[0].id : null;
+        saveAndRender();
+        alert("Імпорт успішно завершено ✔");
+      } else {
+        alert("Некоректний формат файлу — відсутнє поле «children».");
+      }
+    } catch (e){
+      alert("Помилка читання JSON: " + e.message);
+    }
   }).catch(e => alert("Помилка: " + e.message));
 }
 
-/* ============ Sidebar ============ */
+/* ============ Бічне меню ============ */
 function buildSidebar(){
   const nav = $("#sidebar-nav"); nav.innerHTML = "";
   const links = [
     ["Додати дитину", openChildModal],
     ["Розклад дзвінків", openSlotEditor],
-    ["Налаштування Gist", openSettings],
+    ["Оновити з сервера", reloadFromRemote],
     ["Експорт JSON", doExport],
     ["Імпорт JSON", () => $("#import-file").click()]
   ];
@@ -685,10 +714,34 @@ function buildSidebar(){
 function openSidebar(){ $("#scrim").hidden = false; const s = $("#sidebar"); s.hidden = false; setTimeout(() => s.classList.add("open"), 10); }
 function closeSidebar(){ const s = $("#sidebar"); s.classList.remove("open"); setTimeout(() => { $("#scrim").hidden = true; if (s) s.hidden = true; }, 200); }
 
-/* ============ Zapis + render ============ */
-function saveAndRender(){ saveAll(); renderAll(); }
+/* ============ Оновлення застосунку (Service Worker) ============ */
+function showUpdateToast(){
+  if (document.getElementById("update-toast")) return;
+  const t = document.createElement("div");
+  t.className = "update-toast"; t.id = "update-toast";
+  t.innerHTML = '<span>Доступна нова версія розкладу</span>';
+  const btn = document.createElement("button");
+  btn.textContent = "Оновити";
+  btn.addEventListener("click", () => location.reload());
+  t.appendChild(btn);
+  document.body.appendChild(t);
+}
+function registerServiceWorker(){
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("sw.js").then(reg => {
+    reg.addEventListener("updatefound", () => {
+      const sw = reg.installing;
+      if (!sw) return;
+      sw.addEventListener("statechange", () => {
+        if (sw.state === "installed" && navigator.serviceWorker.controller){
+          showUpdateToast();
+        }
+      });
+    });
+  }).catch(e => console.warn("SW register failed:", e));
+}
 
-/* ============ Podlaczenie przyciskow ============ */
+/* ============ Прив'язка обробників ============ */
 function wireEvents(){
   const c = (id, fn) => { const el = $("#" + id); if (el) el.addEventListener("click", fn); };
 
@@ -704,25 +757,26 @@ function wireEvents(){
   c("btn-cancel-slots", () => hide("modal-slots"));
 
   c("btn-save-item", commitItem);
+  c("btn-delete-item", deleteItem);
   c("btn-cancel-item", () => hide("modal-item"));
 
   c("btn-confirm-ok", () => { hide("modal-confirm"); const cb = confirmCb; confirmCb = null; if (cb) cb(); });
   c("btn-confirm-no", () => { hide("modal-confirm"); confirmCb = null; });
 
-  c("btn-save-settings", saveSettings);
-  c("btn-clear-sync", () => {
-    confirmAsync("Відключити Gist-синхронизацію? Дані на пристройці залишаться, але синхронизація миж пристроями припиниться.", () => {
-      state.settings.gistId = ""; state.settings.token = ""; saveLocal(); saveAll();
-      $("#settings-status").textContent = "Gist відключено.";
-    });
-  });
-
   c("btn-export", doExport);
   c("btn-import", () => $("#import-file").click());
+  c("btn-reload-remote", reloadFromRemote);
+  c("btn-export-info-ok", () => hide("modal-export-info"));
+
   c("btn-menu", openSidebar);
   c("btn-sidebar-close", closeSidebar);
   const scrim = $("#scrim"); if (scrim) scrim.addEventListener("click", closeSidebar);
   const importFile = $("#import-file"); if (importFile) importFile.addEventListener("change", e => doImport(e.target.files[0]));
 }
 
-window.addEventListener("DOMContentLoaded", () => { wireEvents(); buildSidebar(); loadAll(); });
+window.addEventListener("DOMContentLoaded", () => {
+  wireEvents();
+  buildSidebar();
+  loadAll();
+  registerServiceWorker();
+});
