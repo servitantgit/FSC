@@ -13,6 +13,51 @@ const LS_SETTINGS = "fsc.settings.v1";
 const GIST_FILENAME = "schedule.json";
 const GIST_API = "https://api.github.com";
 
+/* Палітра предметів як на малюнку */
+const SUBJECT_PALETTE = ["#ffcf44","#38c6f4","#c9a6f2","#ff8c42","#ff6b6b","#7ee081","#4c8df6","#ff9ff3","#2fbf71","#ffd32a","#ffa502","#eccc68"];
+const DEFAULT_SUBJECT_COLOR = "#ffd166";
+
+/* ---------- Нормалізація назв предметів ---------- */
+function normSubject(s){ return String(s || "").trim().toLowerCase(); }
+function getSubjectColor(child, subject){
+  if (!child) return DEFAULT_SUBJECT_COLOR;
+  if (!child.subjectColors) child.subjectColors = {};
+  const key = normSubject(subject);
+  if (key && child.subjectColors[key]) return child.subjectColors[key].color || DEFAULT_SUBJECT_COLOR;
+  // зворотна сумісність: колір міг лежати в картці
+  return DEFAULT_SUBJECT_COLOR;
+}
+function setSubjectColor(child, subject, color){
+  if (!child || !subject || !color) return;
+  if (!child.subjectColors) child.subjectColors = {};
+  const key = normSubject(subject);
+  child.subjectColors[key] = { name: String(subject).trim(), color };
+}
+function collectSubjects(child){
+  const map = new Map();
+  DAYS.forEach(d => {
+    (child.days[d] || []).forEach(v => {
+      if (v && v.subject){
+        const k = normSubject(v.subject);
+        if (k && !map.has(k)) map.set(k, v.subject.trim());
+      }
+    });
+  });
+  if (child.subjectColors) Object.values(child.subjectColors).forEach(e => {
+    const k = normSubject(e.name);
+    if (k && !map.has(k)) map.set(k, e.name);
+  });
+  return [...map.values()].sort((a,b) => a.localeCompare(b, "uk"));
+}
+function autoColorFor(child, subject){
+  const key = normSubject(subject);
+  if (child.subjectColors && child.subjectColors[key]) return child.subjectColors[key].color;
+  // призначити перший вільний колір з палітри
+  const used = new Set(Object.values(child.subjectColors || {}).map(e => e.color));
+  const free = SUBJECT_PALETTE.find(c => !used.has(c));
+  return free || SUBJECT_PALETTE[Object.keys(child.subjectColors || {}).length % SUBJECT_PALETTE.length];
+}
+
 /* ---------- Stan aplikacji ---------- */
 const state = {
   data: { version: 1, children: [] },
@@ -37,6 +82,7 @@ function newChild(name){
     id: uid(), name: name || "Нова дитина", class: "", color: palette[Math.floor(Math.random()*palette.length)],
     slots: defaultSlots(),
     days: Object.fromEntries(DAYS.map(d => [d, []])),
+    subjectColors: {},
     homework: [], exams: []
   };
 }
@@ -47,7 +93,23 @@ function loadLocal(){
     if (raw) state.data = JSON.parse(raw);
     const s = localStorage.getItem(LS_SETTINGS);
     if (s) state.settings = JSON.parse(s);
+    migrateSubjectColors();
   } catch (e) { console.error("local load", e); }
+}
+function migrateSubjectColors(){
+  try {
+    (state.data.children || []).forEach(ch => {
+      if (!ch.subjectColors) ch.subjectColors = {};
+      DAYS.forEach(d => {
+        (ch.days[d] || []).forEach(v => {
+          if (v && v.subject && v.color){
+            const k = normSubject(v.subject);
+            if (k && !ch.subjectColors[k]) ch.subjectColors[k] = { name: v.subject.trim(), color: v.color };
+          }
+        });
+      });
+    });
+  } catch(_){}
 }
 function saveLocal(){
   try {
@@ -172,35 +234,83 @@ function renderContent(){
   main.appendChild(wrap);
 }
 function renderSchedule(child){
+  if (!child.subjectColors) child.subjectColors = {};
   const card = mk("div", "card");
-  card.appendChild(mk("h3", null, "Розклад на тиждень — натисніть на клітинку для редагування"));
+  card.appendChild(mk("h3", null, "Розклад на тиждень — натисніть на картку для редагування, тягніть щоб перемістити"));
   if (!child.slots.length){ card.appendChild(mk("div", "empty", "Немає уроків. Натисніть «Розклад дзвінків», щоб задати час.")); return card; }
-  const table = document.createElement("div"); table.className = "sched"; table.style.overflow = "auto";
-  const head = document.createElement("div"); head.className = "sched-row"; head.style.fontWeight = "700"; head.style.color = "var(--muted)";
-  head.appendChild(mk("span", "time", "Час"));
-  const hc = document.createElement("div"); hc.className = "cells";
-  DAYS.forEach(d => { const c = mk("span", "cell", DAY_SHORT[d]); c.style.cssText = "flex:0 0 64px;border-style:dashed;background:transparent;cursor:default"; hc.appendChild(c); });
-  head.appendChild(hc); table.appendChild(head);
+  const wrap = document.createElement("div"); wrap.className = "sched-table-wrapper";
+  const table = document.createElement("table"); table.className = "sched-table";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  const corner = document.createElement("th"); corner.className = "time-col-header"; corner.textContent = "№ уроку / години"; hr.appendChild(corner);
+  DAYS.forEach(d => { const th = document.createElement("th"); th.textContent = DAY_FULL[d]; hr.appendChild(th); });
+  thead.appendChild(hr); table.appendChild(thead);
+  const tbody = document.createElement("tbody");
 
   child.slots.forEach((slot, si) => {
-    const row = mk("div", "sched-row");
-    const time = mk("span", "time"); time.textContent = slot.label + "\n" + slot.start + "-" + slot.end; time.style.whiteSpace = "pre-wrap";
+    const row = document.createElement("tr");
+    const time = document.createElement("td"); time.className = "time-cell";
+    time.innerHTML = '<span class="slot-num">' + esc(slot.label) + '</span><span class="slot-hours">' + esc(slot.start) + ' – ' + esc(slot.end) + '</span>';
     row.appendChild(time);
-    const cw = document.createElement("div"); cw.className = "cells";
     DAYS.forEach(d => {
-      const cell = document.createElement("button"); cell.className = "cell"; cell.type = "button";
+      const td = document.createElement("td");
+      const slotBox = document.createElement("div"); slotBox.className = "cell-slot";
+      slotBox.dataset.day = d; slotBox.dataset.slot = String(si);
       const val = child.days[d] && child.days[d][si];
       if (val && (val.subject || val.room)){
-        cell.className += " has"; cell.style.background = tint(child.color);
-        cell.innerHTML = "<span>" + esc(val.subject) + "</span>" + (val.room ? '<span class="room">' + esc(val.room) + "</span>" : "");
-      } else { cell.className += " empty-slot"; cell.textContent = "+"; }
-      cell.addEventListener("click", () => openCellEditor(child.id, d, si));
-      cw.appendChild(cell);
+        const color = val.color || getSubjectColor(child, val.subject);
+        const lesson = document.createElement("div");
+        lesson.className = "lesson-card"; lesson.draggable = true;
+        lesson.style.background = color;
+        lesson.dataset.day = d; lesson.dataset.slot = String(si);
+        lesson.title = (val.subject || "") + (val.room ? " • " + val.room : "") + " — тягніть щоб перемістити";
+        const s1 = document.createElement("div"); s1.className = "lesson-subject"; s1.textContent = val.subject || "—";
+        lesson.appendChild(s1);
+        if (val.room){ const s2 = document.createElement("div"); s2.className = "lesson-room"; s2.textContent = "—" + val.room; lesson.appendChild(s2); }
+        lesson.addEventListener("click", () => openCellEditor(child.id, d, si));
+        lesson.addEventListener("dragstart", e => {
+          e.dataTransfer.setData("text/plain", JSON.stringify({ day: d, slot: si }));
+          e.dataTransfer.effectAllowed = "move";
+          dragSrc = { day: d, slot: si };
+          setTimeout(() => lesson.classList.add("dragging"), 0);
+        });
+        lesson.addEventListener("dragend", () => { lesson.classList.remove("dragging"); clearDragOver(); dragSrc = null; });
+        slotBox.appendChild(lesson);
+      } else {
+        const empty = document.createElement("button"); empty.type = "button"; empty.className = "lesson-empty"; empty.textContent = "+ Додати урок";
+        empty.addEventListener("click", () => openCellEditor(child.id, d, si));
+        slotBox.appendChild(empty);
+      }
+      // drop-цілі
+      slotBox.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; slotBox.classList.add("drag-over"); });
+      slotBox.addEventListener("dragleave", () => slotBox.classList.remove("drag-over"));
+      slotBox.addEventListener("drop", e => {
+        e.preventDefault(); slotBox.classList.remove("drag-over");
+        let src = dragSrc;
+        try { const p = JSON.parse(e.dataTransfer.getData("text/plain") || "null"); if (p && p.day) src = p; } catch(_){}
+        if (!src) return;
+        moveLesson(child.id, src.day, +src.slot, d, si);
+      });
+      td.appendChild(slotBox); row.appendChild(td);
     });
-    row.appendChild(cw); table.appendChild(row);
+    tbody.appendChild(row);
   });
-  card.appendChild(table);
+  table.appendChild(tbody); wrap.appendChild(table); card.appendChild(wrap);
   return card;
+}
+
+let dragSrc = null;
+function clearDragOver(){ document.querySelectorAll(".cell-slot.drag-over").forEach(el => el.classList.remove("drag-over")); }
+function moveLesson(childId, fromDay, fromSlot, toDay, toSlot){
+  const child = state.data.children.find(c => c.id === childId);
+  if (!child) return;
+  if (fromDay === toDay && fromSlot === toSlot) return;
+  DAYS.forEach(d => { if (!Array.isArray(child.days[d])) child.days[d] = []; });
+  const a = child.days[fromDay][fromSlot] || null;
+  const b = child.days[toDay][toSlot] || null;
+  child.days[toDay][toSlot] = a;
+  child.days[fromDay][fromSlot] = b;
+  saveAndRender();
 }
 
 function renderListCard(child, kind, title){
@@ -241,17 +351,52 @@ function show(id){ const m = $("#" + id); if (m) m.hidden = false; }
 function hide(id){ const m = $("#" + id); if (m) m.hidden = true; }
 function focusField(id){ const f = $("#" + id); if (f && f.select) f.select(); }
 
-/* --- Komorka rozkladu --- */
+/* --- Комірка розкладу --- */
 let cellCtx = null;
+let cellColorSel = DEFAULT_SUBJECT_COLOR;
+function buildPalette(child, current){
+  const pal = $("#cell-palette"); if (!pal) return;
+  pal.innerHTML = "";
+  cellColorSel = current || DEFAULT_SUBJECT_COLOR;
+  SUBJECT_PALETTE.forEach(c => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "color-swatch" + (c === cellColorSel ? " active" : "");
+    b.style.background = c; b.title = c;
+    b.addEventListener("click", () => {
+      cellColorSel = c;
+      const cc = $("#cell-color"); if (cc) cc.value = c;
+      pal.querySelectorAll(".color-swatch").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+    });
+    pal.appendChild(b);
+  });
+  const cc = $("#cell-color");
+  if (cc){ cc.value = cellColorSel; cc.oninput = () => {
+    cellColorSel = cc.value;
+    pal.querySelectorAll(".color-swatch").forEach(x => x.classList.toggle("active", x.title === cellColorSel));
+  }; }
+}
 function openCellEditor(childId, day, slotIdx){
   const child = state.data.children.find(c => c.id === childId);
   if (!child) return;
+  if (!child.subjectColors) child.subjectColors = {};
   cellCtx = { childId, day, slotIdx };
   const slot = child.slots[slotIdx];
   const val = child.days[day][slotIdx] || {};
-  $("#cell-title").textContent = DAY_FULL[day] + " . " + (slot.start) + "-" + (slot.end);
+  $("#cell-title").textContent = DAY_FULL[day] + " • " + (slot.start) + "–" + (slot.end);
   $("#cell-subject").value = val.subject || "";
   $("#cell-room").value = val.room || "";
+  // datalist існуючих предметів
+  const dl = $("#subjects-datalist"); if (dl){ dl.innerHTML = ""; collectSubjects(child).forEach(n => { const o = document.createElement("option"); o.value = n; dl.appendChild(o); }); }
+  const cur = val.color || (val.subject ? getSubjectColor(child, val.subject) : autoColorFor(child, $("#cell-subject").value));
+  buildPalette(child, cur);
+  // якщо користувач вводить відомий предмет — підставити його колір
+  $("#cell-subject").oninput = e => {
+    const name = e.target.value;
+    const k = normSubject(name);
+    if (child.subjectColors[k]){ cellColorSel = child.subjectColors[k].color; const cc=$("#cell-color"); if(cc) cc.value=cellColorSel;
+      document.querySelectorAll("#cell-palette .color-swatch").forEach(x => x.classList.toggle("active", x.title === cellColorSel)); }
+  };
   show("modal-cell"); focusField("cell-subject");
 }
 function commitCell(){
@@ -260,7 +405,9 @@ function commitCell(){
   if (!child){ hide("modal-cell"); cellCtx = null; return; }
   const subject = $("#cell-subject").value.trim();
   const room = $("#cell-room").value.trim();
-  child.days[cellCtx.day][cellCtx.slotIdx] = (subject || room) ? { subject, room } : null;
+  const color = cellColorSel || $("#cell-color").value;
+  if (subject) setSubjectColor(child, subject, color); // наслідування: всі картки тижня з цим предметом стануть цього кольору
+  child.days[cellCtx.day][cellCtx.slotIdx] = (subject || room) ? { subject, room, color } : null;
   hide("modal-cell"); cellCtx = null; saveAndRender();
 }
 function clearCell(){

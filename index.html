@@ -68,15 +68,32 @@
     </div>
   </div>
 
-  <!-- Редакт кліточки розкладу -->
+  <!-- Редакт клітинки розкладу -->
   <div class="modal" id="modal-cell" hidden>
     <div class="modal__card">
-      <h2 id="cell-title">Предмет</h2>
-      <div class="field"><label>Предмет / урок</label><input type="text" id="cell-subject" placeholder="Наприклад: Математика"></div>
-      <div class="field"><label>Кабінет / вчитель (необов'язково)</label><input type="text" id="cell-room" placeholder="Наприклад: 302"></div>
+      <h2 id="cell-title">Урок</h2>
+      <div class="field">
+        <label>Предмет / заняття</label>
+        <input type="text" id="cell-subject" placeholder="Наприклад: Англійська мова" list="subjects-datalist" autocomplete="off">
+        <datalist id="subjects-datalist"></datalist>
+      </div>
+      <div class="field">
+        <label>Вчитель / кабінет (необов'язково)</label>
+        <input type="text" id="cell-room" placeholder="Наприклад: Гриценко О.В. к. 203">
+      </div>
+      <div class="field">
+        <label>Колір предмета (застосується до всіх уроків цього предмета)</label>
+        <div class="color-palette" id="cell-palette">
+          <!-- Кнопки швидкого вибору кольору -->
+        </div>
+        <div class="custom-color-row">
+          <input type="color" id="cell-color" value="#ffcf44">
+          <span class="muted small">Обрати власний колір</span>
+        </div>
+      </div>
       <div class="row">
         <button class="btn primary" id="btn-save-cell">Зберегти</button>
-        <button class="btn danger" id="btn-clear-cell">Очистити</button>
+        <button class="btn danger" id="btn-clear-cell">Видалити</button>
         <button class="btn ghost" id="btn-cancel-cell">Закрити</button>
       </div>
     </div>
