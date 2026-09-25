@@ -169,3 +169,84 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
 @media (min-width:860px){
   .app{padding:0 24px 30px}
 }
+
+/* ===== Копіювання карток ===== */
+
+/* Картка, що зараз у буфері (marching ants) */
+.lesson-card.in-clipboard{
+  outline:2px dashed #fff;
+  outline-offset:-4px;
+  animation:marching-ants 0.8s linear infinite;
+  position:relative;
+}
+.lesson-card.in-clipboard::after{
+  content:"📋";
+  position:absolute;
+  bottom:2px;
+  right:4px;
+  font-size:11px;
+  opacity:.7;
+  pointer-events:none;
+}
+@keyframes marching-ants{
+  0%{outline-color:rgba(255,255,255,0.9)}
+  50%{outline-color:rgba(255,255,255,0.35)}
+  100%{outline-color:rgba(255,255,255,0.9)}
+}
+
+/* Індикатор "готово вставити" — коли є копія в буфері,
+   порожні клітинки трохи підсвічуються */
+.has-clipboard .lesson-empty:not(.readonly){
+  border-color:rgba(76,141,246,0.4);
+  color:rgba(76,141,246,0.7);
+}
+.has-clipboard .lesson-empty:not(.readonly):hover{
+  border-color:var(--accent);
+  color:var(--accent);
+  background:rgba(76,141,246,0.08);
+}
+
+/* Курсор при Ctrl+drag (браузер сам малює "+", але додамо стан) */
+.lesson-card.copy-drag{
+  opacity:0.55;
+  transform:scale(0.98);
+}
+
+/* Кнопка "Вставити" у модалці — акцентніше, коли є що вставляти */
+#btn-paste-cell:not([hidden]){
+  color:var(--accent);
+  border-color:rgba(76,141,246,0.4);
+}
+#btn-paste-cell:not([hidden]):hover{
+  background:rgba(76,141,246,0.1);
+}
+
+/* Плашка-підказка про буфер (внизу екрана) */
+.clipboard-hint{
+  position:fixed;
+  bottom:16px;
+  right:16px;
+  background:var(--panel);
+  border:1px solid var(--accent);
+  border-radius:10px;
+  padding:8px 12px;
+  font-size:12px;
+  color:var(--text);
+  box-shadow:var(--shadow);
+  z-index:60;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  max-width:90vw;
+}
+.clipboard-hint b{color:var(--accent);font-weight:700}
+.clipboard-hint .cb-clear{
+  background:transparent;
+  border:none;
+  color:var(--muted);
+  cursor:pointer;
+  font-size:14px;
+  padding:0 2px;
+  line-height:1;
+}
+.clipboard-hint .cb-clear:hover{color:var(--err)}

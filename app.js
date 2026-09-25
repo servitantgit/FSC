@@ -27,6 +27,11 @@ const EXTRA_COUNT = 2;
 const TOTAL_ROWS = LESSON_COUNT + EXTRA_COUNT;
 const DEFAULT_EXTRA_START = "16:00";
 const DEFAULT_EXTRA_END = "17:00";
+/* ---------- Буфер обміну карток ---------- */
+const clipboardState = {
+  cell: null,          // копія об'єкта клітинки
+  fromExtra: false     // тип джерела: гурток чи урок
+};
 
 /* ---------- Стан ---------- */
 const state = {
@@ -581,12 +586,18 @@ function renderSchedule(child){
           if (editable){
             lesson.addEventListener("click", () => openCellEditor(child.id, d, si));
             lesson.addEventListener("dragstart", e => {
-              e.dataTransfer.setData("text/plain", JSON.stringify({ day: d, slot: si }));
-              e.dataTransfer.effectAllowed = "move";
-              dragSrc = { day: d, slot: si };
-              setTimeout(() => lesson.classList.add("dragging"), 0);
+              const copy = e.ctrlKey || e.metaKey;
+              e.dataTransfer.setData("text/plain", JSON.stringify({ day: d, slot: si, copy }));
+              e.dataTransfer.effectAllowed = copy ? "copy" : "move";
+              dragSrc = { day: d, slot: si, copy };
+              setTimeout(() => lesson.classList.add(copy ? "copy-drag" : "dragging"), 0);
             });
-            lesson.addEventListener("dragend", () => { lesson.classList.remove("dragging"); clearDragOver(); dragSrc = null; });
+            lesson.addEventListener("dragend", () => {
+              lesson.classList.remove("dragging");
+              lesson.classList.remove("copy-drag");
+              clearDragOver();
+              dragSrc = null;
+            });
           }
           slotBox.appendChild(lesson);
         } else {
@@ -602,26 +613,40 @@ function renderSchedule(child){
           slotBox.appendChild(empty);
         }
         if (editable){
-          slotBox.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; slotBox.classList.add("drag-over"); });
+          slotBox.addEventListener("dragover", e => {
+            e.preventDefault();
+            const copy = e.ctrlKey || e.metaKey || (dragSrc && dragSrc.copy);
+            e.dataTransfer.dropEffect = copy ? "copy" : "move";
+            slotBox.classList.add("drag-over");
+          });
           slotBox.addEventListener("dragleave", () => slotBox.classList.remove("drag-over"));
           slotBox.addEventListener("drop", e => {
             e.preventDefault(); slotBox.classList.remove("drag-over");
             let src = dragSrc;
-            try { const p = JSON.parse(e.dataTransfer.getData("text/plain") || "null"); if (p && p.day) src = p; } catch(_){}
+            try {
+              const p = JSON.parse(e.dataTransfer.getData("text/plain") || "null");
+              if (p && p.day) src = p;
+            } catch(_){}
             if (!src) return;
-            // Заборона переносити у заблоковану клітинку
             if (isBlockedCell(d, si)){
               showToast("Уроків у вихідні немає", "err");
               return;
             }
-            // Заборона переносити з урочного рядка в гуртковий і навпаки — типи заняття різні
             const fromExtra = isExtraRow(+src.slot);
             const toExtra = isExtraRow(si);
             if (fromExtra !== toExtra){
-              showToast("Не можна переносити між уроками й гуртками", "err");
+              showToast(toExtra
+                ? (src.copy ? "Не можна копіювати урок у місце гуртка" : "Не можна переносити урок у місце гуртка")
+                : (src.copy ? "Не можна копіювати гурток у місце уроку" : "Не можна переносити гурток у місце уроку"), "err");
               return;
             }
-            moveLesson(child.id, src.day, +src.slot, d, si);
+            // Ctrl/Cmd → копіювання, без — переміщення (як раніше)
+            const isCopy = (e.ctrlKey || e.metaKey || src.copy);
+            if (isCopy){
+              cloneLesson(child.id, src.day, +src.slot, d, si);
+            } else {
+              moveLesson(child.id, src.day, +src.slot, d, si);
+            }
           });
         }
       }
@@ -647,6 +672,123 @@ function moveLesson(childId, fromDay, fromSlot, toDay, toSlot){
   child.days[toDay][toSlot] = a;
   child.days[fromDay][fromSlot] = b;
   saveAndRender();
+}
+
+/* ============ Копіювання / вставка карток ============ */
+
+function copyCell(day, slotIdx){
+  const child = activeChild();
+  if (!child) return;
+  const val = child.days[day][slotIdx];
+  if (!val || (!val.subject && !val.teacher && !val.room)){
+    showToast("Клітинка порожня — нічого копіювати", "err");
+    return;
+  }
+  clipboardState.cell = JSON.parse(JSON.stringify(val)); // глибока копія
+  clipboardState.fromExtra = isExtraRow(slotIdx);
+  renderClipboardHint();
+  markClipboardCard(day, slotIdx);
+  showToast("Скопійовано: " + (val.subject || "заняття"), "ok");
+}
+
+function pasteCell(day, slotIdx, opts){
+  opts = opts || {};
+  if (!clipboardState.cell){
+    showToast("Буфер порожній", "err");
+    return;
+  }
+  if (isBlockedCell(day, slotIdx)){
+    showToast("Уроків у вихідні немає", "err");
+    return;
+  }
+  const toExtra = isExtraRow(slotIdx);
+  if (toExtra !== clipboardState.fromExtra){
+    showToast(toExtra
+      ? "Не можна вставляти урок у місце гуртка"
+      : "Не можна вставляти гурток у місце уроку", "err");
+    return;
+  }
+  const child = activeChild();
+  if (!child) return;
+  const target = child.days[day][slotIdx];
+  const hasContent = target && (target.subject || target.teacher || target.room);
+  const doIt = () => {
+    child.days[day][slotIdx] = JSON.parse(JSON.stringify(clipboardState.cell));
+    saveAndRender();
+    renderClipboardHint(); // залишаємо буфер — можна вставити ще раз
+    showToast("Вставлено ✔", "ok");
+  };
+  if (hasContent && !opts.force){
+    confirmAsync("Клітинка зайнята. Замінити її вміст?", doIt);
+  } else {
+    doIt();
+  }
+}
+
+function clearClipboard(){
+  clipboardState.cell = null;
+  clipboardState.fromExtra = false;
+  renderClipboardHint();
+  document.querySelectorAll(".lesson-card.in-clipboard").forEach(el => el.classList.remove("in-clipboard"));
+}
+
+function markClipboardCard(day, slotIdx){
+  document.querySelectorAll(".lesson-card.in-clipboard").forEach(el => el.classList.remove("in-clipboard"));
+  const sel = '.cell-slot[data-day="' + day + '"][data-slot="' + slotIdx + '"] .lesson-card';
+  const el = document.querySelector(sel);
+  if (el) el.classList.add("in-clipboard");
+}
+
+function renderClipboardHint(){
+  const existing = $("#clipboard-hint");
+  const has = !!clipboardState.cell;
+  document.body.classList.toggle("has-clipboard", has);
+  if (!has){
+    if (existing) existing.remove();
+    return;
+  }
+  const label = clipboardState.cell.subject || (clipboardState.fromExtra ? "гурток" : "урок");
+  const type = clipboardState.fromExtra ? "гурток" : "урок";
+  if (existing){
+    const txt = existing.querySelector(".cb-text");
+    if (txt) txt.innerHTML = "📋 У буфері (" + type + "): <b>" + esc(label) + "</b>";
+    return;
+  }
+  const hint = document.createElement("div");
+  hint.id = "clipboard-hint";
+  hint.className = "clipboard-hint";
+  hint.innerHTML = '<span class="cb-text">📋 У буфері (' + type + '): <b>' + esc(label) + '</b></span>';
+  const btn = document.createElement("button");
+  btn.className = "cb-clear";
+  btn.title = "Очистити буфер (Esc)";
+  btn.textContent = "✕";
+  btn.addEventListener("click", clearClipboard);
+  hint.appendChild(btn);
+  document.body.appendChild(hint);
+}
+
+function cloneLesson(childId, fromDay, fromSlot, toDay, toSlot){
+  const child = state.data.children.find(c => c.id === childId);
+  if (!child) return;
+  if (isBlockedCell(toDay, toSlot)) return;
+  if (isExtraRow(fromSlot) !== isExtraRow(toSlot)){
+    showToast("Не можна копіювати між уроками й гуртками", "err");
+    return;
+  }
+  const src = child.days[fromDay][fromSlot];
+  if (!src) return;
+  const target = child.days[toDay][toSlot];
+  const hasContent = target && (target.subject || target.teacher || target.room);
+  const doIt = () => {
+    child.days[toDay][toSlot] = JSON.parse(JSON.stringify(src));
+    saveAndRender();
+    showToast("Скопійовано ✔", "ok");
+  };
+  if (hasContent){
+    confirmAsync("Клітинка зайнята. Замінити її вміст?", doIt);
+  } else {
+    doIt();
+  }
 }
 
 function renderListCard(child, kind, title){
@@ -768,7 +910,12 @@ function openCellEditor(childId, day, slotIdx){
       document.querySelectorAll("#cell-palette .color-swatch").forEach(x => x.classList.toggle("active", x.title === cellColorSel));
     }
   };
-
+  // Показуємо кнопку «Вставити» лише коли в буфері є щось сумісного типу
+  const pasteBtn = $("#btn-paste-cell");
+  if (pasteBtn){
+    const canPaste = !!clipboardState.cell && (clipboardState.fromExtra === isExtra);
+    pasteBtn.hidden = !canPaste;
+  }
   show("modal-cell"); focusField("cell-subject");
 }
 function commitCell(){
@@ -790,7 +937,10 @@ function commitCell(){
     : null;
   child.days[cellCtx.day][cellCtx.slotIdx] = cell;
 
+  const ctx = cellCtx;
   hide("modal-cell"); cellCtx = null; saveAndRender();
+  // Якщо в буфері була саме ця картка — оновимо її
+  if (clipboardState.cell) markClipboardCard(ctx.day, ctx.slotIdx);
 }
 function clearCell(){
   if (!cellCtx) return;
@@ -1057,11 +1207,46 @@ function wireEvents(){
   c("btn-sidebar-close", closeSidebar);
   const scrim = $("#scrim"); if (scrim) scrim.addEventListener("click", closeSidebar);
   const importFile = $("#import-file"); if (importFile) importFile.addEventListener("change", e => doImport(e.target.files[0]));
-
+  c("btn-copy-cell", () => {
+    if (!cellCtx) return;
+    copyCell(cellCtx.day, cellCtx.slotIdx);
+  });
+  c("btn-paste-cell", () => {
+    if (!cellCtx) return;
+    const ctx = cellCtx;
+    hide("modal-cell"); cellCtx = null;
+    pasteCell(ctx.day, ctx.slotIdx);
+  });
   window.addEventListener("keydown", e => {
+    if (!canEdit()) return;
+    // Ctrl+S — зберегти на сервер
     if ((e.ctrlKey || e.metaKey) && e.key === "s"){
       e.preventDefault();
-      if (canEdit() && state.hasLocalChanges) pushRemote();
+      if (state.hasLocalChanges) pushRemote();
+      return;
+    }
+    // Esc — очистити буфер
+    if (e.key === "Escape" && clipboardState.cell){
+      clearClipboard();
+      showToast("Буфер очищено", "info");
+      return;
+    }
+    // Ctrl+C / Ctrl+V працюють ТІЛЬКИ коли відкрита модалка клітинки
+    // (щоб не заважати звичайному копіюванню тексту зі сторінки)
+    const modalOpen = cellCtx && !$("#modal-cell").hidden;
+    if (!modalOpen) return;
+    // Не перехоплюємо, якщо фокус у полі вводу
+    const inField = e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
+    if (inField) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c"){
+      e.preventDefault();
+      copyCell(cellCtx.day, cellCtx.slotIdx);
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v"){
+      e.preventDefault();
+      const ctx = cellCtx;
+      hide("modal-cell"); cellCtx = null;
+      pasteCell(ctx.day, ctx.slotIdx);
     }
   });
   window.addEventListener("beforeunload", e => {
