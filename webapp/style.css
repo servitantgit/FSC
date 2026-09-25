@@ -1,0 +1,91 @@
+/* ===== Family School Web – стилі ===== */
+:root{
+  --bg:#0f1420;--panel:#161d2e;--panel2:#1d2640;--text:#e8ecf3;--muted:#8a94a8;
+  --line:#24304a;--accent:#4c8df6;--ok:#2fbf71;--warn:#e6a23c;--err:#e5484d;
+  --radius:14px;--shadow:0 8px 24px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;font-size:15px;-webkit-tap-highlight-color:transparent}
+.app{max-width:1080px;margin:0 auto;padding:0 12px 26px;display:flex;flex-direction:column;gap:14px}
+
+.topbar{position:sticky;top:0;z-index:40;display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px}
+.topbar__left{display:flex;align-items:center;gap:8px}
+.topbar__title{font-size:17px;font-weight:700;margin:0;letter-spacing:.2px}
+.topbar__right{display:flex;align-items:center;gap:10px;margin-left:auto}
+.icon-btn{width:38px;height:38px;border-radius:10px;background:transparent;border:1px solid var(--line);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+.icon-btn:hover{background:var(--panel2)}
+.ic{width:20px;height:20px}
+
+.sync-indicator{width:12px;height:12px;border-radius:50%;background:var(--muted)}
+.sync-indicator.sync-ok{background:var(--ok);box-shadow:0 0 0 3px rgba(47,191,113,.25)}
+.sync-indicator.sync-off{background:var(--muted)}
+.sync-indicator.sync-err{background:var(--err)}
+.sync-indicator.sync-busy{background:var(--warn)}
+
+.child-tabs{display:flex;flex-wrap:wrap;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px}
+.child-tab{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;font-weight:600}
+.child-tab.active{background:var(--panel2);border-color:var(--accent)}
+.child-tab .dot{width:10px;height:10px;border-radius:50%;background:currentColor}
+.child-tab .x{font-size:13px;color:var(--muted);margin-left:2px;line-height:1}
+.child-tab .x:hover{color:var(--err)}
+
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px}
+.chip{padding:6px 11px;border-radius:16px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;font-weight:600}
+.chip.active{background:var(--panel2);border-color:var(--accent);color:#fff}
+.tool-btn{border:1px solid var(--line);background:transparent;color:var(--accent);border-radius:10px;padding:6px 10px;cursor:pointer;font-size:13px}
+
+.sched{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.sched-row{display:flex;align-items:center;border-bottom:1px solid var(--line)}
+.sched-row:last-child{border-bottom:none}
+.sched-row .time{color:var(--muted);font-size:12px;min-width:76px;padding:8px 8px;line-height:1.25}
+.sched-row .cells{display:flex;gap:6px;flex-wrap:wrap;padding:6px 2px;flex:1}
+.cell{min-width:64px;padding:8px 8px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;font-weight:600;line-height:1.15}
+.cell.has{background:var(--tint,#4c8df6)}
+.cell.has span{display:block;font-size:11px;opacity:.8}
+.cell.empty-slot{color:var(--muted);font-size:12px;opacity:.6}
+.cell .room{font-size:11px;color:var(--muted)}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.card h3{margin:0 0 10px;font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.item-form{display:flex;flex-direction:column;gap:8px}
+.item-form input{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:8px 10px;font-size:15px}
+.item-form input::placeholder{color:var(--muted)}
+
+.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:600}
+.btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+.btn.danger{background:transparent;color:var(--err);border-color:var(--err)}
+.btn.ghost{background:transparent;color:var(--text)}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+.field label{font-size:12px;color:var(--muted)}
+.field input{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;padding:9px 11px;font-size:15px}
+.muted{color:var(--muted);font-size:13px}
+.small{font-size:11px}
+.status{font-size:13px;margin-top:8px}
+h2{font-size:18px;margin:0 0 12px;font-weight:700}
+
+.footer-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:50}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:280px;max-width:85%;background:var(--panel);z-index:60;transform:translateX(-100%);transition:transform .22s ease;overflow:auto}
+.sidebar.open{transform:none}
+.sidebar__close{position:absolute;top:12px;right:12px}
+.sidebar__nav{display:flex;flex-direction:column;gap:4px;padding:60px 14px 22px}
+.side-link{padding:11px 14px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;text-align:left;font-size:15px}
+.side-link:hover{background:var(--panel2)}
+
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:70;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal__card{width:min(480px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;max-height:90vh;overflow:auto}
+
+.empty{background:var(--panel);border:1px dashed var(--line);border-radius:var(--radius);padding:26px;color:var(--muted);text-align:center}
+
+@media (min-width:860px){
+  .app{padding:0 24px 30px}
+}
+.list{display:flex;flex-direction:column;gap:8px}
+.list-item{display:flex;align-items:center;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px}
+.list-item .bar{width:4px;align-self:stretch;background:currentColor;border-radius:2px}
+.list-item .txt{flex:1}
+.list-item .meta{color:var(--muted);font-size:12px}
+.add-btn{width:100%;padding:9px;border:1px dashed var(--line);background:transparent;color:var(--accent);border-radius:10px;cursor:pointer;margin-top:6px}
