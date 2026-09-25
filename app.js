@@ -1,15 +1,17 @@
 /* ============================================================
    Family School Web — дитячий розклад
    Cloudflare Pages + KV варіант
-     - GET  /api/schedule   — публічне читання
-     - PUT  /api/schedule   — запис (заголовок X-Edit-Password)
-   Локально зміни зберігаються у localStorage.
-   Публікація на сервер — кнопкою «Зберегти на сервер».
+   Оновлення:
+     - вихідні (Сб/Нд): уроки заблоковані, гуртки доступні
+     - кабінет — окремий бейдж у куті картки
+     - вчитель/тренер — окреме поле
+     - гуртки мають власний час (в самій клітинці)
    ============================================================ */
 'use strict';
 
 /* ---------- Константи ---------- */
 const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
+const WEEKEND_DAYS = new Set(["sat","sun"]);
 const DAY_FULL = {mon:"Понеділок",tue:"Вівторок",wed:"Середа",thu:"Четвер",fri:"П'ятниця",sat:"Субота",sun:"Неділя"};
 const LS_DATA = "fsc.data.v1";
 const LS_DIRTY = "fsc.dirty.v1";
@@ -23,14 +25,16 @@ const DEFAULT_SUBJECT_COLOR = "#ffd166";
 const LESSON_COUNT = 8;
 const EXTRA_COUNT = 2;
 const TOTAL_ROWS = LESSON_COUNT + EXTRA_COUNT;
+const DEFAULT_EXTRA_START = "16:00";
+const DEFAULT_EXTRA_END = "17:00";
 
 /* ---------- Стан ---------- */
 const state = {
-  data: { version: 1, children: [] },
+  data: { version: 2, children: [] },
   activeChildId: null,
   hasLocalChanges: false,
-  password: "",           // порожній → режим «тільки перегляд»
-  updatedAt: null,        // ISO-дата останнього серверного оновлення
+  password: "",
+  updatedAt: null,
   saving: false
 };
 
@@ -44,6 +48,9 @@ function todayISO(){
   return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate());
 }
 function canEdit(){ return !!state.password; }
+function isExtraRow(i){ return i >= LESSON_COUNT; }
+function isWeekend(d){ return WEEKEND_DAYS.has(d); }
+function isBlockedCell(day, slotIdx){ return isWeekend(day) && !isExtraRow(slotIdx); }
 
 /* ---------- Кольори предметів ---------- */
 function normSubject(s){ return String(s || "").trim().toLowerCase(); }
@@ -90,25 +97,24 @@ function defaultLessonSlots(){
     { num: "1", label: "", start: "08:00", end: "08:45" },
     { num: "2", label: "", start: "08:55", end: "09:40" },
     { num: "3", label: "", start: "09:50", end: "10:35" },
-    { num: "4", label: "", start: "10:50", end: "11:35" },
-    { num: "5", label: "", start: "11:45", end: "12:30" },
-    { num: "6", label: "", start: "12:40", end: "13:25" },
-    { num: "7", label: "", start: "13:35", end: "14:20" },
-    { num: "8", label: "", start: "14:30", end: "15:15" }
+    { num: "4", label: "", start: "10:45", end: "11:30" },
+    { num: "5", label: "", start: "11:50", end: "12:35" },
+    { num: "6", label: "", start: "12:55", end: "13:40" },
+    { num: "7", label: "", start: "13:50", end: "14:35" },
+    { num: "8", label: "", start: "14:45", end: "15:30" }
   ];
 }
 function defaultExtraSlots(){
   return [
-    { num: "★1", label: "Гурток 1", start: "16:00", end: "17:00" },
-    { num: "★2", label: "Гурток 2", start: "17:15", end: "18:15" }
+    { num: "★1", label: "Гурток", start: "", end: "" },
+    { num: "★2", label: "Гурток", start: "", end: "" }
   ];
 }
 function defaultSlots(){ return defaultLessonSlots().concat(defaultExtraSlots()); }
-function isExtraRow(i){ return i >= LESSON_COUNT; }
 
 function normalizeSlots(slots){
   const list = Array.isArray(slots) ? slots.map(s => ({
-    num: String(s && (s.num !== undefined && s.num !== null ? s.num : (s.label !== undefined && s.label !== null ? s.label : ""))),
+    num: String(s && (s.num !== undefined && s.num !== null ? s.num : "")),
     label: (s && s.label) ? String(s.label) : "",
     start: (s && s.start) || "",
     end: (s && s.end) || ""
@@ -122,7 +128,7 @@ function normalizeSlots(slots){
   }
   while (extras.length < EXTRA_COUNT){
     const d = dE[extras.length];
-    extras.push({ num: d.num, label: d.label, start: d.start, end: d.end });
+    extras.push({ num: d.num, label: d.label, start: "", end: "" });
   }
   lessons.forEach((s, i) => { if (!s.num) s.num = String(i + 1); });
   extras.forEach((s, i) => { if (!s.num) s.num = "★" + (i + 1); });
@@ -138,10 +144,21 @@ function emptyDayObject(){
   DAYS.forEach(d => { o[d] = emptyDaySlots(); });
   return o;
 }
+function normalizeCell(v){
+  if (!v || typeof v !== "object") return null;
+  return {
+    subject: v.subject || "",
+    teacher: v.teacher || "",
+    room: v.room || "",
+    color: v.color || "",
+    start: v.start || "",
+    end: v.end || ""
+  };
+}
 function normalizeDay(arr){
   const out = Array.isArray(arr) ? arr.map(v => {
-    if (v && typeof v === "object") return { subject: v.subject || "", room: v.room || "", color: v.color || "" };
-    if (typeof v === "string") return { subject: v, room: "", color: "" };
+    if (v && typeof v === "object") return normalizeCell(v);
+    if (typeof v === "string") return { subject: v, teacher: "", room: "", color: "", start: "", end: "" };
     return null;
   }) : [];
   while (out.length < TOTAL_ROWS) out.push(null);
@@ -158,13 +175,14 @@ function newChild(name){
   };
 }
 function normalizeData(data){
-  if (!data || typeof data !== "object") data = { version: 1, children: [] };
+  if (!data || typeof data !== "object") data = { version: 2, children: [] };
   if (!Array.isArray(data.children)) data.children = [];
   data.children.forEach(ch => {
     if (!ch.subjectColors) ch.subjectColors = {};
     ch.slots = normalizeSlots(ch.slots);
     if (!ch.days) ch.days = emptyDayObject();
     DAYS.forEach(d => { ch.days[d] = normalizeDay(ch.days[d]); });
+    // Автозаповнення subjectColors з даних (для сумісності)
     DAYS.forEach(d => {
       (ch.days[d] || []).forEach(v => {
         if (v && v.subject && v.color){
@@ -172,6 +190,12 @@ function normalizeData(data){
           if (k && !ch.subjectColors[k]) ch.subjectColors[k] = { name: v.subject.trim(), color: v.color };
         }
       });
+    });
+    // Прибираємо уроки з вихідних (безпечно, якщо колись з'явились)
+    ["sat","sun"].forEach(wd => {
+      for (let i = 0; i < LESSON_COUNT; i++){
+        if (ch.days[wd] && ch.days[wd][i]) ch.days[wd][i] = null;
+      }
     });
     if (!Array.isArray(ch.homework)) ch.homework = [];
     if (!Array.isArray(ch.exams)) ch.exams = [];
@@ -308,15 +332,12 @@ async function pushRemote(){
 
 async function loadAll(){
   loadLocal();
-
-  // якщо є локальні зміни — не перетираємо їх серверною версією
   if (state.hasLocalChanges && state.data.children.length){
     if (!state.activeChildId) state.activeChildId = state.data.children[0].id;
     refreshIndicator();
     renderAll();
     return;
   }
-
   setSync("busy", "Завантаження розкладу…");
   const remote = await fetchRemote();
   if (remote){
@@ -465,81 +486,146 @@ function renderSchedule(child){
   if (!child.slots.length){ card.appendChild(mk("div", "empty", "Немає уроків.")); return card; }
   const wrap = document.createElement("div"); wrap.className = "sched-table-wrapper";
   const table = document.createElement("table"); table.className = "sched-table";
+
   const thead = document.createElement("thead");
   const hr = document.createElement("tr");
-  const corner = document.createElement("th"); corner.className = "time-col-header"; corner.textContent = "№ уроку / години"; hr.appendChild(corner);
-  DAYS.forEach(d => { const th = document.createElement("th"); th.textContent = DAY_FULL[d]; hr.appendChild(th); });
+  const corner = document.createElement("th"); corner.className = "time-col-header"; corner.textContent = "№ / години"; hr.appendChild(corner);
+  DAYS.forEach(d => {
+    const th = document.createElement("th");
+    th.textContent = DAY_FULL[d];
+    if (isWeekend(d)) th.classList.add("weekend-th");
+    hr.appendChild(th);
+  });
   thead.appendChild(hr); table.appendChild(thead);
-  const tbody = document.createElement("tbody");
 
+  const tbody = document.createElement("tbody");
   child.slots = normalizeSlots(child.slots);
   DAYS.forEach(d => { child.days[d] = normalizeDay(child.days[d]); });
-
   const editable = canEdit();
 
   for (let si = 0; si < TOTAL_ROWS; si++){
     const slot = child.slots[si] || {};
     const row = document.createElement("tr");
-    if (isExtraRow(si)) row.classList.add("extra-row");
+    const isExtra = isExtraRow(si);
+    if (isExtra) row.classList.add("extra-row");
 
+    // Ліва колонка часу
     const time = document.createElement("td");
-    time.className = "time-cell" + (isExtraRow(si) ? " extra-time" : "");
+    time.className = "time-cell" + (isExtra ? " extra-time" : "");
     const numTxt = slot.num || String(si + 1);
-    const kindTxt = slot.label ? esc(slot.label) : (isExtraRow(si) ? "Додаткове" : "Урок");
-    time.innerHTML = '<span class="slot-num">' + esc(numTxt) + '</span><span class="slot-kind">' + kindTxt + '</span><span class="slot-hours">' + esc(slot.start) + ' – ' + esc(slot.end) + '</span>';
+    if (isExtra){
+      // Для гуртків час у лівій колонці НЕ показуємо (він у самій картці)
+      const kindTxt = "Гурток";
+      time.innerHTML = '<span class="slot-num">' + esc(numTxt) + '</span><span class="slot-kind">' + kindTxt + '</span>';
+    } else {
+      time.innerHTML = '<span class="slot-num">' + esc(numTxt) + '</span><span class="slot-kind">Урок</span><span class="slot-hours">' + esc(slot.start) + ' – ' + esc(slot.end) + '</span>';
+    }
     row.appendChild(time);
 
+    // Клітинки по днях
     DAYS.forEach(d => {
       const td = document.createElement("td");
       const slotBox = document.createElement("div");
-      slotBox.className = "cell-slot" + (isExtraRow(si) ? " extra-slot" : "");
+      slotBox.className = "cell-slot" + (isExtra ? " extra-slot" : "");
       slotBox.dataset.day = d; slotBox.dataset.slot = String(si);
-      const val = child.days[d] && child.days[d][si];
-      if (val && (val.subject || val.room)){
-        const color = val.color || getSubjectColor(child, val.subject);
-        const lesson = document.createElement("div");
-        lesson.className = "lesson-card" + (isExtraRow(si) ? " extra-card" : "") + (editable ? "" : " readonly");
-        lesson.draggable = editable;
-        lesson.style.background = color;
-        lesson.dataset.day = d; lesson.dataset.slot = String(si);
-        lesson.title = (val.subject || "") + (val.room ? " • " + val.room : "") + (editable ? " — тягніть щоб перемістити" : "");
-        const s1 = document.createElement("div"); s1.className = "lesson-subject"; s1.textContent = val.subject || "—";
-        lesson.appendChild(s1);
-        if (val.room){ const s2 = document.createElement("div"); s2.className = "lesson-room"; s2.textContent = "— " + val.room; lesson.appendChild(s2); }
-        if (editable){
-          lesson.addEventListener("click", () => openCellEditor(child.id, d, si));
-          lesson.addEventListener("dragstart", e => {
-            e.dataTransfer.setData("text/plain", JSON.stringify({ day: d, slot: si }));
-            e.dataTransfer.effectAllowed = "move";
-            dragSrc = { day: d, slot: si };
-            setTimeout(() => lesson.classList.add("dragging"), 0);
-          });
-          lesson.addEventListener("dragend", () => { lesson.classList.remove("dragging"); clearDragOver(); dragSrc = null; });
-        }
-        slotBox.appendChild(lesson);
+
+      const blocked = isBlockedCell(d, si);
+
+      if (blocked){
+        // Уроки у Сб/Нд — заблоковано
+        const bl = mk("div", "cell-blocked", "—");
+        bl.title = "Уроків у вихідні немає";
+        slotBox.appendChild(bl);
       } else {
-        const empty = document.createElement("button");
-        empty.type = "button";
-        empty.className = "lesson-empty" + (isExtraRow(si) ? " extra-add" : "") + (editable ? "" : " readonly");
-        empty.textContent = editable ? (isExtraRow(si) ? "+ Додати заняття" : "+ Додати урок") : "—";
-        if (editable){
-          empty.addEventListener("click", () => openCellEditor(child.id, d, si));
+        const val = child.days[d] && child.days[d][si];
+        if (val && (val.subject || val.room || val.teacher)){
+          const color = val.color || getSubjectColor(child, val.subject);
+          const lesson = document.createElement("div");
+          lesson.className = "lesson-card" + (isExtra ? " extra-card" : "") + (editable ? "" : " readonly");
+          lesson.draggable = editable;
+          lesson.style.background = color;
+          lesson.dataset.day = d; lesson.dataset.slot = String(si);
+          const tt = [];
+          if (val.subject) tt.push(val.subject);
+          if (val.teacher) tt.push(val.teacher);
+          if (val.room) tt.push("каб. " + val.room);
+          if (isExtra && val.start && val.end) tt.push(val.start + "–" + val.end);
+          lesson.title = tt.join(" • ") + (editable ? " — тягніть щоб перемістити" : "");
+
+          // Час зверху (тільки для гуртків, якщо заданий)
+          if (isExtra && val.start && val.end){
+            const t = document.createElement("div");
+            t.className = "time-badge";
+            t.textContent = val.start + " – " + val.end;
+            lesson.appendChild(t);
+          }
+          // Назва предмета
+          const s1 = document.createElement("div"); s1.className = "lesson-subject";
+          s1.textContent = val.subject || "—";
+          lesson.appendChild(s1);
+          // Вчитель / тренер
+          if (val.teacher){
+            const s2 = document.createElement("div"); s2.className = "lesson-teacher";
+            s2.textContent = val.teacher;
+            lesson.appendChild(s2);
+          }
+          // Бейдж кабінету у куті
+          if (val.room){
+            const b = document.createElement("div");
+            b.className = "room-badge";
+            b.textContent = val.room;
+            b.title = "Кабінет / аудиторія: " + val.room;
+            lesson.appendChild(b);
+          }
+
+          if (editable){
+            lesson.addEventListener("click", () => openCellEditor(child.id, d, si));
+            lesson.addEventListener("dragstart", e => {
+              e.dataTransfer.setData("text/plain", JSON.stringify({ day: d, slot: si }));
+              e.dataTransfer.effectAllowed = "move";
+              dragSrc = { day: d, slot: si };
+              setTimeout(() => lesson.classList.add("dragging"), 0);
+            });
+            lesson.addEventListener("dragend", () => { lesson.classList.remove("dragging"); clearDragOver(); dragSrc = null; });
+          }
+          slotBox.appendChild(lesson);
         } else {
-          empty.disabled = true;
+          const empty = document.createElement("button");
+          empty.type = "button";
+          empty.className = "lesson-empty" + (isExtra ? " extra-add" : "") + (editable ? "" : " readonly");
+          empty.textContent = editable ? (isExtra ? "+ Додати заняття" : "+ Додати урок") : "—";
+          if (editable){
+            empty.addEventListener("click", () => openCellEditor(child.id, d, si));
+          } else {
+            empty.disabled = true;
+          }
+          slotBox.appendChild(empty);
         }
-        slotBox.appendChild(empty);
+        if (editable){
+          slotBox.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; slotBox.classList.add("drag-over"); });
+          slotBox.addEventListener("dragleave", () => slotBox.classList.remove("drag-over"));
+          slotBox.addEventListener("drop", e => {
+            e.preventDefault(); slotBox.classList.remove("drag-over");
+            let src = dragSrc;
+            try { const p = JSON.parse(e.dataTransfer.getData("text/plain") || "null"); if (p && p.day) src = p; } catch(_){}
+            if (!src) return;
+            // Заборона переносити у заблоковану клітинку
+            if (isBlockedCell(d, si)){
+              showToast("Уроків у вихідні немає", "err");
+              return;
+            }
+            // Заборона переносити з урочного рядка в гуртковий і навпаки — типи заняття різні
+            const fromExtra = isExtraRow(+src.slot);
+            const toExtra = isExtraRow(si);
+            if (fromExtra !== toExtra){
+              showToast("Не можна переносити між уроками й гуртками", "err");
+              return;
+            }
+            moveLesson(child.id, src.day, +src.slot, d, si);
+          });
+        }
       }
-      if (editable){
-        slotBox.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; slotBox.classList.add("drag-over"); });
-        slotBox.addEventListener("dragleave", () => slotBox.classList.remove("drag-over"));
-        slotBox.addEventListener("drop", e => {
-          e.preventDefault(); slotBox.classList.remove("drag-over");
-          let src = dragSrc;
-          try { const p = JSON.parse(e.dataTransfer.getData("text/plain") || "null"); if (p && p.day) src = p; } catch(_){}
-          if (!src) return;
-          moveLesson(child.id, src.day, +src.slot, d, si);
-        });
-      }
+
       td.appendChild(slotBox); row.appendChild(td);
     });
     tbody.appendChild(row);
@@ -554,6 +640,7 @@ function moveLesson(childId, fromDay, fromSlot, toDay, toSlot){
   const child = state.data.children.find(c => c.id === childId);
   if (!child) return;
   if (fromDay === toDay && fromSlot === toSlot) return;
+  if (isBlockedCell(toDay, toSlot)) return;
   DAYS.forEach(d => { if (!Array.isArray(child.days[d])) child.days[d] = []; });
   const a = child.days[fromDay][fromSlot] || null;
   const b = child.days[toDay][toSlot] || null;
@@ -626,16 +713,52 @@ function openCellEditor(childId, day, slotIdx){
   if (!canEdit()) return;
   const child = state.data.children.find(c => c.id === childId);
   if (!child) return;
+  if (isBlockedCell(day, slotIdx)) return;
   if (!child.subjectColors) child.subjectColors = {};
   cellCtx = { childId, day, slotIdx };
   const slot = child.slots[slotIdx];
   const val = child.days[day][slotIdx] || {};
-  $("#cell-title").textContent = DAY_FULL[day] + " • " + (slot.start) + "–" + (slot.end);
+  const isExtra = isExtraRow(slotIdx);
+
+  // Заголовок і мітки
+  if (isExtra){
+    $("#cell-title").textContent = DAY_FULL[day] + " • Гурток " + (slotIdx - LESSON_COUNT + 1);
+    $("#cell-teacher-label").textContent = "Тренер / керівник (необов'язково)";
+    $("#cell-teacher").placeholder = "Наприклад: тр. Іваненко";
+    $("#cell-subject").placeholder = "Наприклад: Плавання";
+  } else {
+    $("#cell-title").textContent = DAY_FULL[day] + " • " + (slot.start) + "–" + (slot.end);
+    $("#cell-teacher-label").textContent = "Вчитель (необов'язково)";
+    $("#cell-teacher").placeholder = "Наприклад: Гриценко О.В.";
+    $("#cell-subject").placeholder = "Наприклад: Математика";
+  }
+
+  // Поля значень
   $("#cell-subject").value = val.subject || "";
+  $("#cell-teacher").value = val.teacher || "";
   $("#cell-room").value = val.room || "";
-  const dl = $("#subjects-datalist"); if (dl){ dl.innerHTML = ""; collectSubjects(child).forEach(n => { const o = document.createElement("option"); o.value = n; dl.appendChild(o); }); }
+
+  // Час — тільки для гуртків
+  const timeField = $("#cell-time-field");
+  if (isExtra){
+    timeField.hidden = false;
+    $("#cell-start").value = val.start || DEFAULT_EXTRA_START;
+    $("#cell-end").value = val.end || DEFAULT_EXTRA_END;
+  } else {
+    timeField.hidden = true;
+    $("#cell-start").value = "";
+    $("#cell-end").value = "";
+  }
+
+  // Datalist існуючих предметів
+  const dl = $("#subjects-datalist");
+  if (dl){ dl.innerHTML = ""; collectSubjects(child).forEach(n => { const o = document.createElement("option"); o.value = n; dl.appendChild(o); }); }
+
+  // Колір
   const cur = val.color || (val.subject ? getSubjectColor(child, val.subject) : autoColorFor(child, $("#cell-subject").value));
   buildPalette(child, cur);
+
+  // Автопідстановка кольору при введенні відомого предмета
   $("#cell-subject").oninput = e => {
     const name = e.target.value;
     const k = normSubject(name);
@@ -645,17 +768,28 @@ function openCellEditor(childId, day, slotIdx){
       document.querySelectorAll("#cell-palette .color-swatch").forEach(x => x.classList.toggle("active", x.title === cellColorSel));
     }
   };
+
   show("modal-cell"); focusField("cell-subject");
 }
 function commitCell(){
   if (!cellCtx) return;
   const child = state.data.children.find(c => c.id === cellCtx.childId);
   if (!child){ hide("modal-cell"); cellCtx = null; return; }
+  const isExtra = isExtraRow(cellCtx.slotIdx);
   const subject = $("#cell-subject").value.trim();
+  const teacher = $("#cell-teacher").value.trim();
   const room = $("#cell-room").value.trim();
   const color = cellColorSel || $("#cell-color").value;
+  const start = isExtra ? ($("#cell-start").value || DEFAULT_EXTRA_START) : "";
+  const end = isExtra ? ($("#cell-end").value || DEFAULT_EXTRA_END) : "";
+
   if (subject) setSubjectColor(child, subject, color);
-  child.days[cellCtx.day][cellCtx.slotIdx] = (subject || room) ? { subject, room, color } : null;
+
+  const cell = (subject || teacher || room)
+    ? { subject, teacher, room, color, start, end }
+    : null;
+  child.days[cellCtx.day][cellCtx.slotIdx] = cell;
+
   hide("modal-cell"); cellCtx = null; saveAndRender();
 }
 function clearCell(){
@@ -665,7 +799,7 @@ function clearCell(){
   hide("modal-cell"); cellCtx = null; saveAndRender();
 }
 
-/* --- Дзвінки --- */
+/* --- Дзвінки (тільки уроки 1–8) --- */
 let slotCtx = null;
 function openSlotEditor(){
   if (!canEdit()) return;
@@ -674,52 +808,36 @@ function openSlotEditor(){
   child.slots = normalizeSlots(child.slots);
   $("#slot-title").textContent = "Розклад дзвінків: " + child.name;
   const lessons = child.slots.slice(0, LESSON_COUNT);
-  const extras = child.slots.slice(LESSON_COUNT, TOTAL_ROWS);
   const lessonsHtml = lessons.map((s, i) => `
-    <div class="slot-row" data-kind="lesson" data-idx="${i}">
+    <div class="slot-row" data-idx="${i}">
       <span class="slot-row-num">${i + 1}</span>
       <input type="time" class="slot-start" value="${esc(s.start || '08:00')}">
       <span class="slot-dash">–</span>
       <input type="time" class="slot-end" value="${esc(s.end || '08:45')}">
     </div>
   `).join("");
-  const extrasHtml = extras.map((s, i) => `
-    <div class="slot-row extra" data-kind="extra" data-idx="${i}">
-      <span class="slot-row-num">★${i + 1}</span>
-      <input type="text" class="slot-label" placeholder="Назва (напр. Гурток / Футбол)" value="${esc(s.label || '')}">
-      <input type="time" class="slot-start" value="${esc(s.start || '16:00')}">
-      <span class="slot-dash">–</span>
-      <input type="time" class="slot-end" value="${esc(s.end || '17:00')}">
-    </div>
-  `).join("");
   const lList = $("#slot-lessons-list"); if (lList) lList.innerHTML = lessonsHtml;
-  const eList = $("#slot-extras-list"); if (eList) eList.innerHTML = extrasHtml;
   show("modal-slots");
 }
 function commitSlots(){
   if (!slotCtx) return;
-  const newSlots = [];
+  const newLessons = [];
   document.querySelectorAll("#slot-lessons-list .slot-row").forEach((row, i) => {
     const st = row.querySelector(".slot-start");
     const en = row.querySelector(".slot-end");
-    newSlots.push({
+    newLessons.push({
       num: String(i + 1), label: "",
       start: (st && st.value) || "08:00",
       end: (en && en.value) || "08:45"
     });
   });
-  document.querySelectorAll("#slot-extras-list .slot-row").forEach((row, i) => {
-    const lbl = row.querySelector(".slot-label");
-    const st = row.querySelector(".slot-start");
-    const en = row.querySelector(".slot-end");
-    newSlots.push({
-      num: "★" + (i + 1),
-      label: (lbl && lbl.value.trim()) || ("Гурток " + (i + 1)),
-      start: (st && st.value) || (i === 0 ? "16:00" : "17:15"),
-      end: (en && en.value) || (i === 0 ? "17:00" : "18:15")
-    });
-  });
-  slotCtx.slots = normalizeSlots(newSlots);
+  // Гуртки в slots залишаємо як є (для сумісності структури, час у клітинках)
+  const oldExtras = slotCtx.slots.slice(LESSON_COUNT, TOTAL_ROWS);
+  const extras = [
+    { num: "★1", label: (oldExtras[0] && oldExtras[0].label) || "Гурток", start: "", end: "" },
+    { num: "★2", label: (oldExtras[1] && oldExtras[1].label) || "Гурток", start: "", end: "" }
+  ];
+  slotCtx.slots = normalizeSlots(newLessons.concat(extras));
   DAYS.forEach(d => { slotCtx.days[d] = normalizeDay(slotCtx.days[d]); });
   hide("modal-slots"); slotCtx = null; saveAndRender();
 }
@@ -806,25 +924,19 @@ function confirmAsync(msg, onOk){
   show("modal-confirm");
 }
 
-/* ============ Налаштування (пароль) ============ */
+/* ============ Налаштування ============ */
 function openSettings(){
   $("#set-password").value = state.password || "";
   const s = $("#settings-status");
   if (s){
-    if (canEdit()){
-      s.textContent = "✓ Режим редагування увімкнено";
-      s.className = "status ok";
-    } else {
-      s.textContent = "Режим перегляду";
-      s.className = "status";
-    }
+    if (canEdit()){ s.textContent = "✓ Режим редагування увімкнено"; s.className = "status ok"; }
+    else { s.textContent = "Режим перегляду"; s.className = "status"; }
   }
   show("modal-settings"); focusField("set-password");
 }
 async function saveSettings(){
   const pw = $("#set-password").value.trim();
   if (!pw){ showToast("Введіть пароль", "err"); return; }
-  // швидка перевірка: пробуємо зробити PUT з поточними даними
   const oldPw = state.password;
   state.password = pw;
   const ok = await verifyPassword();
@@ -843,8 +955,6 @@ async function saveSettings(){
   }
 }
 async function verifyPassword(){
-  // Робимо PUT з поточними даними (без markDirty) — перевірка пароля.
-  // Якщо локальних змін немає — це просто «підтвердження» серверної версії з новим updatedAt.
   try {
     const res = await fetch(API_URL, {
       method: "PUT",
@@ -876,7 +986,7 @@ function doLogout(){
   showToast("Режим редагування вимкнено", "info");
 }
 
-/* ============ Експорт / імпорт (резервні) ============ */
+/* ============ Експорт / імпорт ============ */
 function doExport(){
   const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
@@ -921,50 +1031,39 @@ function buildSidebar(){
 function openSidebar(){ $("#scrim").hidden = false; const s = $("#sidebar"); s.hidden = false; setTimeout(() => s.classList.add("open"), 10); }
 function closeSidebar(){ const s = $("#sidebar"); s.classList.remove("open"); setTimeout(() => { $("#scrim").hidden = true; if (s) s.hidden = true; }, 200); }
 
-/* ============ Прив'язка обробників ============ */
+/* ============ Обробники ============ */
 function wireEvents(){
   const c = (id, fn) => { const el = $("#" + id); if (el) el.addEventListener("click", fn); };
-
   c("btn-add-child", openChildModal);
   c("btn-save-child", saveChild);
   c("btn-cancel-child", () => hide("modal-child"));
-
   c("btn-save-cell", commitCell);
   c("btn-clear-cell", clearCell);
   c("btn-cancel-cell", () => hide("modal-cell"));
-
   c("btn-save-slots", commitSlots);
   c("btn-cancel-slots", () => hide("modal-slots"));
-
   c("btn-save-item", commitItem);
   c("btn-delete-item", deleteItem);
   c("btn-cancel-item", () => hide("modal-item"));
-
   c("btn-confirm-ok", () => { hide("modal-confirm"); const cb = confirmCb; confirmCb = null; if (cb) cb(); });
   c("btn-confirm-no", () => { hide("modal-confirm"); confirmCb = null; });
-
   c("btn-save-settings", saveSettings);
   c("btn-logout", doLogout);
-
   c("btn-save-remote", pushRemote);
   c("btn-reload-remote", reloadFromRemote);
   c("btn-export", doExport);
   c("btn-import", () => $("#import-file").click());
-
   c("btn-menu", openSidebar);
   c("btn-sidebar-close", closeSidebar);
   const scrim = $("#scrim"); if (scrim) scrim.addEventListener("click", closeSidebar);
   const importFile = $("#import-file"); if (importFile) importFile.addEventListener("change", e => doImport(e.target.files[0]));
 
-  // Ctrl/Cmd+S — швидке збереження на сервер
   window.addEventListener("keydown", e => {
     if ((e.ctrlKey || e.metaKey) && e.key === "s"){
       e.preventDefault();
       if (canEdit() && state.hasLocalChanges) pushRemote();
     }
   });
-
-  // Попередження при закритті вкладки з незбереженими змінами
   window.addEventListener("beforeunload", e => {
     if (state.hasLocalChanges && canEdit()){
       e.preventDefault();

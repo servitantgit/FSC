@@ -76,15 +76,34 @@
   <div class="modal" id="modal-cell" hidden>
     <div class="modal__card">
       <h2 id="cell-title">Урок</h2>
+
       <div class="field">
         <label>Предмет / заняття</label>
-        <input type="text" id="cell-subject" placeholder="Наприклад: Англійська мова" list="subjects-datalist" autocomplete="off">
+        <input type="text" id="cell-subject" placeholder="Наприклад: Математика" list="subjects-datalist" autocomplete="off">
         <datalist id="subjects-datalist"></datalist>
       </div>
+
       <div class="field">
-        <label>Вчитель / кабінет (необов'язково)</label>
-        <input type="text" id="cell-room" placeholder="Наприклад: Гриценко О.В. к. 203">
+        <label id="cell-teacher-label">Вчитель (необов'язково)</label>
+        <input type="text" id="cell-teacher" placeholder="Наприклад: Гриценко О.В.">
       </div>
+
+      <div class="field">
+        <label>Кабінет / аудиторія (необов'язково)</label>
+        <input type="text" id="cell-room" placeholder="Наприклад: 203, А12, спортзал" maxlength="10">
+        <span class="muted small">Показується маленьким бейджем у куті картки. Порожнє поле — бейджа немає.</span>
+      </div>
+
+      <!-- Блок для гуртків: час початку і кінця -->
+      <div class="field" id="cell-time-field" hidden>
+        <label>Час заняття</label>
+        <div class="row" style="align-items:center">
+          <input type="time" id="cell-start" value="16:00">
+          <span class="muted">–</span>
+          <input type="time" id="cell-end" value="17:00">
+        </div>
+      </div>
+
       <div class="field">
         <label>Колір предмета (застосується до всіх уроків цього предмета)</label>
         <div class="color-palette" id="cell-palette"></div>
@@ -93,6 +112,7 @@
           <span class="muted small">Обрати власний колір</span>
         </div>
       </div>
+
       <div class="row">
         <button class="btn primary" id="btn-save-cell">Зберегти</button>
         <button class="btn danger" id="btn-clear-cell">Видалити</button>
@@ -101,15 +121,13 @@
     </div>
   </div>
 
-  <!-- Редагування дзвінків -->
+  <!-- Редагування дзвінків (тільки уроки 1–8) -->
   <div class="modal" id="modal-slots" hidden>
     <div class="modal__card modal__card--wide">
       <h2 id="slot-title">Розклад дзвінків</h2>
-      <p class="muted">8 уроків + 2 додаткові заняття (гурток / тренування) на кожен день — усього 10 рядків.</p>
+      <p class="muted">Час 8 уроків (Пн–Пт). Час гуртків задається окремо для кожного заняття.</p>
       <h3 class="slots-subtitle">Уроки 1–8</h3>
       <div class="slots-list" id="slot-lessons-list"></div>
-      <h3 class="slots-subtitle">Додаткові заняття (довільний час)</h3>
-      <div class="slots-list" id="slot-extras-list"></div>
       <div class="row" style="margin-top:10px">
         <button class="btn primary" id="btn-save-slots">Зберегти</button>
         <button class="btn ghost" id="btn-cancel-slots">Скасувати</button>
