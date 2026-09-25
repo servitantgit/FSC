@@ -18,12 +18,17 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .icon-btn{width:38px;height:38px;border-radius:10px;background:transparent;border:1px solid var(--line);color:var(--text);cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
 .icon-btn:hover{background:var(--panel2)}
 
-.sync-indicator{width:12px;height:12px;border-radius:50%;background:var(--muted)}
+.sync-indicator{width:12px;height:12px;border-radius:50%;background:var(--muted);cursor:help}
 .sync-indicator.sync-ok{background:var(--ok);box-shadow:0 0 0 3px rgba(47,191,113,.25)}
 .sync-indicator.sync-off{background:var(--muted)}
-.sync-indicator.sync-err{background:var(--err)}
+.sync-indicator.sync-err{background:var(--err);box-shadow:0 0 0 3px rgba(229,72,77,.25)}
 .sync-indicator.sync-busy{background:var(--warn)}
-.sync-indicator.sync-local{background:var(--accent);box-shadow:0 0 0 3px rgba(76,141,246,.25)}
+.sync-indicator.sync-local{background:var(--accent);box-shadow:0 0 0 3px rgba(76,141,246,.25);animation:pulse-local 1.6s ease-in-out infinite}
+.sync-indicator.sync-readonly{background:var(--muted);border:1px solid var(--line)}
+@keyframes pulse-local{
+  0%,100%{box-shadow:0 0 0 3px rgba(76,141,246,.25)}
+  50%{box-shadow:0 0 0 6px rgba(76,141,246,.15)}
+}
 
 .child-tabs{display:flex;flex-wrap:wrap;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px}
 .child-tab{display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border-radius:20px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;font-weight:600}
@@ -33,9 +38,14 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .child-tab .x:hover{color:var(--err)}
 
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:8px 12px}
-.chip{padding:6px 11px;border-radius:16px;border:1px solid var(--line);background:transparent;color:var(--text);cursor:pointer;font-weight:600}
-.chip.active{background:var(--panel2);border-color:var(--accent);color:#fff}
 .tool-btn{border:1px solid var(--line);background:transparent;color:var(--accent);border-radius:10px;padding:6px 10px;cursor:pointer;font-size:13px}
+.tool-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Банер режиму «тільки перегляд» */
+.readonly-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;background:rgba(76,141,246,.08);border:1px solid rgba(76,141,246,.3);border-radius:var(--radius);padding:10px 14px;font-size:13px;color:var(--text)}
+.readonly-banner .ro-text{flex:1}
+.readonly-banner .ro-text b{color:var(--accent)}
+.readonly-banner button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:600;font-size:13px}
 
 .sched-table-wrapper{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:10px}
 .sched-table{width:100%;min-width:860px;border-collapse:separate;border-spacing:5px}
@@ -50,11 +60,14 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .lesson-card:hover{filter:brightness(1.06);box-shadow:0 3px 10px rgba(0,0,0,0.25)}
 .lesson-card:active{cursor:grabbing}
 .lesson-card.dragging{opacity:0.35;cursor:grabbing;transform:scale(0.97)}
+.lesson-card.readonly{cursor:default}
 .lesson-subject{font-size:13px;font-weight:700;line-height:1.2;color:#111;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .lesson-room{font-size:11px;font-weight:600;line-height:1.15;color:#222;opacity:.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .lesson-empty{display:flex;align-items:center;justify-content:center;min-height:56px;height:100%;width:100%;border-radius:8px;border:1px dashed var(--line);background:transparent;color:var(--muted);cursor:pointer;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;transition:background .15s ease,border-color .15s ease}
 .lesson-empty:hover{background:var(--panel2);border-color:var(--accent);color:var(--text)}
+.lesson-empty.readonly{cursor:default;opacity:.5}
+.lesson-empty.readonly:hover{background:transparent;border-color:var(--line);color:var(--muted)}
 
 .cell-slot{height:100%;min-height:56px;border-radius:8px;position:relative}
 .cell-slot.drag-over{outline:2px dashed var(--accent);outline-offset:-2px;background:rgba(76,141,246,0.15);border-radius:8px}
@@ -73,7 +86,13 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .item-form input::placeholder{color:var(--muted)}
 
 .btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:10px;padding:8px 14px;cursor:pointer;font-weight:600}
+.btn:disabled{opacity:.5;cursor:not-allowed}
 .btn.primary{background:var(--accent);color:#fff;border-color:transparent}
+.btn.primary.pending{background:var(--warn);animation:pulse-btn 1.4s ease-in-out infinite}
+@keyframes pulse-btn{
+  0%,100%{filter:brightness(1)}
+  50%{filter:brightness(1.15)}
+}
 .btn.danger{background:transparent;color:var(--err);border-color:var(--err)}
 .btn.ghost{background:transparent;color:var(--text)}
 .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -84,6 +103,8 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .muted{color:var(--muted);font-size:13px}
 .small{font-size:11px}
 .status{font-size:13px;margin-top:8px}
+.status.ok{color:var(--ok)}
+.status.err{color:var(--err)}
 h2{font-size:18px;margin:0 0 12px;font-weight:700}
 
 .footer-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
@@ -100,8 +121,6 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
 .modal__card{width:min(480px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;max-height:90vh;overflow:auto}
 .modal__card--wide{width:min(580px,96vw)}
 .modal__card code{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:13px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.steps{margin:10px 0 14px;padding-left:20px;color:var(--text);font-size:14px;line-height:1.55}
-.steps li{margin-bottom:4px}
 
 .empty{background:var(--panel);border:1px dashed var(--line);border-radius:var(--radius);padding:26px;color:var(--muted);text-align:center}
 
@@ -131,8 +150,11 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
 .sched-table tr.extra-row .lesson-empty.extra-add:hover{background:rgba(230,162,60,0.12);border-color:var(--warn);color:#fff}
 .sched-table tr.extra-row .lesson-card.extra-card{border:1.5px solid rgba(230,162,60,0.5);box-shadow:0 3px 8px rgba(230,162,60,0.15)}
 
-.update-toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--accent);border-radius:12px;padding:10px 14px;display:flex;align-items:center;gap:10px;box-shadow:var(--shadow);z-index:80;font-size:14px}
-.update-toast button{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:600}
+/* Тост про статус збереження */
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 16px;box-shadow:var(--shadow);z-index:80;font-size:14px;display:flex;align-items:center;gap:10px;max-width:90vw}
+.toast.toast-ok{border-color:var(--ok);color:var(--ok)}
+.toast.toast-err{border-color:var(--err);color:var(--err)}
+.toast.toast-info{border-color:var(--accent);color:var(--text)}
 
 @media (min-width:860px){
   .app{padding:0 24px 30px}

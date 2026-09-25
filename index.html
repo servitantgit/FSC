@@ -26,9 +26,10 @@
     <main class="content" id="content"></main>
 
     <div class="footer-actions">
-      <button class="btn primary" id="btn-export">Експорт JSON</button>
-      <button class="btn ghost" id="btn-import">Імпорт JSON</button>
+      <button class="btn primary" id="btn-save-remote" hidden>💾 Зберегти на сервер</button>
       <button class="btn ghost" id="btn-reload-remote">Оновити з сервера</button>
+      <button class="btn ghost" id="btn-export">Експорт JSON</button>
+      <button class="btn ghost" id="btn-import">Імпорт JSON</button>
       <input type="file" id="import-file" accept=".json,application/json" hidden>
     </div>
   </div>
@@ -38,6 +39,24 @@
     <button class="icon-btn sidebar__close" id="btn-sidebar-close">✕</button>
     <nav class="sidebar__nav" id="sidebar-nav"></nav>
   </aside>
+
+  <!-- Налаштування редагування -->
+  <div class="modal" id="modal-settings" hidden>
+    <div class="modal__card">
+      <h2>Режим редагування</h2>
+      <p class="muted">Введіть пароль редагування, щоб публікувати зміни на сервер. Без пароля доступний лише перегляд.</p>
+      <div class="field">
+        <label>Пароль редагування</label>
+        <input type="password" id="set-password" placeholder="••••••••" autocomplete="off">
+      </div>
+      <div class="row">
+        <button class="btn primary" id="btn-save-settings">Увімкнути редагування</button>
+        <button class="btn ghost" id="btn-logout">Вимкнути</button>
+      </div>
+      <p class="status" id="settings-status"></p>
+      <p class="muted small">Пароль зберігається лише у вашому браузері (localStorage) і надсилається на API лише при збереженні.</p>
+    </div>
+  </div>
 
   <!-- Додавання дитини -->
   <div class="modal" id="modal-child" hidden>
@@ -53,7 +72,7 @@
     </div>
   </div>
 
-  <!-- Редакт клітинки розкладу -->
+  <!-- Редагування клітинки розкладу -->
   <div class="modal" id="modal-cell" hidden>
     <div class="modal__card">
       <h2 id="cell-title">Урок</h2>
@@ -115,23 +134,6 @@
           <button class="btn danger" id="btn-delete-item">Видалити</button>
           <button class="btn ghost" id="btn-cancel-item">Скасувати</button>
         </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Інформація про експорт -->
-  <div class="modal" id="modal-export-info" hidden>
-    <div class="modal__card">
-      <h2>Як опублікувати зміни</h2>
-      <p class="muted">Файл <code>schedule.json</code> завантажено у ваші «Завантаження».</p>
-      <ol class="steps">
-        <li>Відкрийте репозиторій на GitHub.</li>
-        <li>Замініть файл <code>schedule.json</code> у корені репозиторію на щойно завантажений.</li>
-        <li>Зробіть commit (пуш у гілку <code>main</code>).</li>
-        <li>Через 1–2 хвилини оновіть сторінку — Service Worker підхопить нову версію.</li>
-      </ol>
-      <div class="row">
-        <button class="btn primary" id="btn-export-info-ok">Зрозуміло</button>
       </div>
     </div>
   </div>

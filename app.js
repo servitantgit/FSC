@@ -1,9 +1,10 @@
 /* ============================================================
    Family School Web — дитячий розклад
-   Статичний застосунок для GitHub Pages
-   Читання: schedule.json з того ж домену (публічно)
-   Редагування: локально в localStorage
-   Публікація: експорт JSON → пуш у репозиторій
+   Cloudflare Pages + KV варіант
+     - GET  /api/schedule   — публічне читання
+     - PUT  /api/schedule   — запис (заголовок X-Edit-Password)
+   Локально зміни зберігаються у localStorage.
+   Публікація на сервер — кнопкою «Зберегти на сервер».
    ============================================================ */
 'use strict';
 
@@ -12,7 +13,9 @@ const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
 const DAY_FULL = {mon:"Понеділок",tue:"Вівторок",wed:"Середа",thu:"Четвер",fri:"П'ятниця",sat:"Субота",sun:"Неділя"};
 const LS_DATA = "fsc.data.v1";
 const LS_DIRTY = "fsc.dirty.v1";
-const REMOTE_FILE = "schedule.json";
+const LS_PASSWORD = "fsc.password.v1";
+const LS_UPDATED_AT = "fsc.updatedAt.v1";
+const API_URL = "/api/schedule";
 
 const SUBJECT_PALETTE = ["#ffcf44","#38c6f4","#c9a6f2","#ff8c42","#ff6b6b","#7ee081","#4c8df6","#ff9ff3","#2fbf71","#ffd32a","#ffa502","#eccc68"];
 const DEFAULT_SUBJECT_COLOR = "#ffd166";
@@ -25,7 +28,10 @@ const TOTAL_ROWS = LESSON_COUNT + EXTRA_COUNT;
 const state = {
   data: { version: 1, children: [] },
   activeChildId: null,
-  hasLocalChanges: false
+  hasLocalChanges: false,
+  password: "",           // порожній → режим «тільки перегляд»
+  updatedAt: null,        // ISO-дата останнього серверного оновлення
+  saving: false
 };
 
 /* ---------- Утиліти ---------- */
@@ -37,6 +43,7 @@ function todayISO(){
   const p = n => String(n).padStart(2, "0");
   return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate());
 }
+function canEdit(){ return !!state.password; }
 
 /* ---------- Кольори предметів ---------- */
 function normSubject(s){ return String(s || "").trim().toLowerCase(); }
@@ -158,7 +165,6 @@ function normalizeData(data){
     ch.slots = normalizeSlots(ch.slots);
     if (!ch.days) ch.days = emptyDayObject();
     DAYS.forEach(d => { ch.days[d] = normalizeDay(ch.days[d]); });
-    // Міграція: колір із картки → subjectColors
     DAYS.forEach(d => {
       (ch.days[d] || []).forEach(v => {
         if (v && v.subject && v.color){
@@ -173,7 +179,7 @@ function normalizeData(data){
   return data;
 }
 
-/* ---------- Індикатор стану ---------- */
+/* ---------- Індикатор ---------- */
 function setSync(cls, title){
   const el = $("#sync-indicator");
   if (!el) return;
@@ -181,8 +187,38 @@ function setSync(cls, title){
   el.title = title || "";
 }
 function refreshIndicator(){
-  if (state.hasLocalChanges) setSync("local", "Є локальні зміни — експортуйте JSON і опублікуйте");
-  else setSync("ok", "Дані з сервера");
+  if (state.saving){ setSync("busy", "Збереження на сервер…"); return; }
+  if (state.hasLocalChanges){
+    setSync("local", canEdit()
+      ? "Є локальні зміни — натисніть «Зберегти на сервер»"
+      : "Є локальні зміни (без права публікації — режим перегляду)");
+    return;
+  }
+  if (!canEdit()){ setSync("readonly", "Режим перегляду"); return; }
+  setSync("ok", "Синхронізовано з сервером" + (state.updatedAt ? " (" + fmtDate(state.updatedAt) + ")" : ""));
+}
+function fmtDate(iso){
+  try {
+    const d = new Date(iso);
+    const p = n => String(n).padStart(2, "0");
+    return p(d.getDate()) + "." + p(d.getMonth()+1) + "." + d.getFullYear() + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+  } catch { return iso; }
+}
+
+/* ---------- Тости ---------- */
+let toastTimer = null;
+function showToast(msg, kind){
+  const cls = "toast toast-" + (kind || "info");
+  let el = $("#toast");
+  if (!el){
+    el = document.createElement("div");
+    el.id = "toast";
+    document.body.appendChild(el);
+  }
+  el.className = cls;
+  el.textContent = msg;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { if (el) el.remove(); }, 3200);
 }
 
 /* ---------- Сховище ---------- */
@@ -191,6 +227,8 @@ function loadLocal(){
     const raw = localStorage.getItem(LS_DATA);
     if (raw) state.data = normalizeData(JSON.parse(raw));
     state.hasLocalChanges = localStorage.getItem(LS_DIRTY) === "1";
+    state.password = localStorage.getItem(LS_PASSWORD) || "";
+    state.updatedAt = localStorage.getItem(LS_UPDATED_AT) || null;
   } catch (e) {
     console.error("Помилка читання localStorage:", e);
   }
@@ -211,23 +249,67 @@ function clearDirty(){
   localStorage.removeItem(LS_DIRTY);
 }
 
+/* ---------- API ---------- */
 async function fetchRemote(){
   try {
-    // ?v=timestamp щоб оминути кеш браузера при явному запиті
-    const res = await fetch(REMOTE_FILE + "?v=" + Date.now(), { cache: "no-cache" });
+    const res = await fetch(API_URL, { cache: "no-store" });
     if (!res.ok) return null;
     const parsed = await res.json();
+    if (parsed && parsed.updatedAt){
+      state.updatedAt = parsed.updatedAt;
+      localStorage.setItem(LS_UPDATED_AT, parsed.updatedAt);
+    }
     return normalizeData(parsed);
   } catch (e) {
-    console.warn("Не вдалося прочитати " + REMOTE_FILE + ":", e);
+    console.warn("Не вдалося прочитати " + API_URL + ":", e);
     return null;
+  }
+}
+async function pushRemote(){
+  if (!canEdit()){ showToast("Спершу увімкніть режим редагування", "err"); return false; }
+  state.saving = true; refreshIndicator();
+  try {
+    const res = await fetch(API_URL, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Edit-Password": state.password
+      },
+      body: JSON.stringify(state.data)
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 401){
+      showToast("Невірний пароль редагування", "err");
+      state.saving = false; refreshIndicator();
+      return false;
+    }
+    if (!res.ok){
+      showToast("Не вдалося зберегти: " + (body.error || res.status), "err");
+      state.saving = false; refreshIndicator();
+      return false;
+    }
+    if (body.updatedAt){
+      state.updatedAt = body.updatedAt;
+      localStorage.setItem(LS_UPDATED_AT, body.updatedAt);
+    }
+    clearDirty();
+    state.saving = false;
+    refreshIndicator();
+    renderFooter();
+    showToast("Зміни збережено на сервер ✔", "ok");
+    return true;
+  } catch (e){
+    state.saving = false;
+    refreshIndicator();
+    showToast("Помилка мережі: " + e.message, "err");
+    return false;
   }
 }
 
 async function loadAll(){
   loadLocal();
 
-  // Якщо є локальні зміни — не перетираємо їх серверною версією
+  // якщо є локальні зміни — не перетираємо їх серверною версією
   if (state.hasLocalChanges && state.data.children.length){
     if (!state.activeChildId) state.activeChildId = state.data.children[0].id;
     refreshIndicator();
@@ -248,7 +330,7 @@ async function loadAll(){
 }
 
 async function reloadFromRemote(){
-  confirmAsync("Оновити дані з сервера? Ваші локальні незбережені зміни буде втрачено.", async () => {
+  const doIt = async () => {
     setSync("busy", "Завантаження…");
     const remote = await fetchRemote();
     if (remote){
@@ -258,16 +340,24 @@ async function reloadFromRemote(){
       saveLocal(false);
       refreshIndicator();
       renderAll();
+      showToast("Дані оновлено з сервера", "ok");
     } else {
-      setSync("err", "Не вдалося завантажити " + REMOTE_FILE);
+      setSync("err", "Не вдалося завантажити з сервера");
       setTimeout(refreshIndicator, 2500);
+      showToast("Не вдалося завантажити", "err");
     }
-  });
+  };
+  if (state.hasLocalChanges){
+    confirmAsync("Оновити дані з сервера? Ваші локальні незбережені зміни буде втрачено.", doIt);
+  } else {
+    doIt();
+  }
 }
 
 function markChanged(){
   saveLocal(true);
   refreshIndicator();
+  renderFooter();
 }
 function saveAndRender(){
   markChanged();
@@ -276,7 +366,7 @@ function saveAndRender(){
 
 /* ============ Рендеринг ============ */
 function activeChild(){ return state.data.children.find(c => c.id === state.activeChildId); }
-function renderAll(){ renderChildTabs(); renderToolbar(); renderContent(); }
+function renderAll(){ renderReadonlyBanner(); renderChildTabs(); renderToolbar(); renderContent(); renderFooter(); }
 
 function mk(tag, cls, text, onClick){
   const el = document.createElement(tag);
@@ -286,6 +376,19 @@ function mk(tag, cls, text, onClick){
   return el;
 }
 
+function renderReadonlyBanner(){
+  const existing = $("#readonly-banner");
+  if (canEdit()){ if (existing) existing.remove(); return; }
+  if (existing) return;
+  const banner = document.createElement("div");
+  banner.className = "readonly-banner"; banner.id = "readonly-banner";
+  banner.innerHTML = '<span class="ro-text">👁 <b>Режим перегляду</b> — редагування вимкнено. Введіть пароль, щоб публікувати зміни.</span>';
+  const btn = mk("button", null, "Увійти для редагування", openSettings);
+  banner.appendChild(btn);
+  const tabs = $("#child-tabs");
+  tabs.parentNode.insertBefore(banner, tabs);
+}
+
 function renderChildTabs(){
   const nav = $("#child-tabs"); nav.innerHTML = "";
   if (!state.data.children.length){ nav.appendChild(mk("span", "muted", "Ще немає дітей")); return; }
@@ -293,9 +396,11 @@ function renderChildTabs(){
     const b = document.createElement("button");
     b.className = "child-tab" + (c.id === state.activeChildId ? " active" : "");
     b.innerHTML = '<span class="dot" style="color:' + esc(c.color) + '"></span><span>' + esc(c.name) + "</span>";
-    const x = mk("span", "x", "×");
-    x.addEventListener("click", e => { e.stopPropagation(); delChild(c.id); });
-    b.appendChild(x);
+    if (canEdit()){
+      const x = mk("span", "x", "×");
+      x.addEventListener("click", e => { e.stopPropagation(); delChild(c.id); });
+      b.appendChild(x);
+    }
     b.addEventListener("click", () => { state.activeChildId = c.id; renderAll(); });
     nav.appendChild(b);
   });
@@ -308,19 +413,26 @@ function renderToolbar(){
   t.hidden = false;
   const seg = mk("span", "muted", child.class ? child.name + " • " + child.class : child.name);
   seg.style.fontSize = "13px";
-  const editSlots = mk("button", "tool-btn", "Розклад дзвінків", openSlotEditor);
-  const addHw = mk("button", "tool-btn", "+ Домашка", () => openItemEditor("homework"));
-  const addEx = mk("button", "tool-btn", "+ Контрольна", () => openItemEditor("exams"));
-  const del = mk("button", "tool-btn", "Видалити"); del.style.color = "var(--err)";
-  del.addEventListener("click", () => delChild(child.id));
-  t.append(seg, editSlots, addHw, addEx, del);
+  t.append(seg);
+  if (canEdit()){
+    t.append(
+      mk("button", "tool-btn", "Розклад дзвінків", openSlotEditor),
+      mk("button", "tool-btn", "+ Домашка", () => openItemEditor("homework")),
+      mk("button", "tool-btn", "+ Контрольна", () => openItemEditor("exams"))
+    );
+    const del = mk("button", "tool-btn", "Видалити"); del.style.color = "var(--err)";
+    del.addEventListener("click", () => delChild(child.id));
+    t.append(del);
+  }
 }
 
 function renderContent(){
   const child = activeChild(); const main = $("#content"); main.innerHTML = "";
   if (!child){
     const d = mk("div", "empty");
-    d.textContent = "Натисніть «+» вгорі, щоб додати дитину та створити розклад.";
+    d.textContent = canEdit()
+      ? "Натисніть «+» вгорі, щоб додати дитину та створити розклад."
+      : "Розклад ще не створено.";
     main.appendChild(d); return;
   }
   const wrap = document.createElement("div");
@@ -331,11 +443,26 @@ function renderContent(){
   main.appendChild(wrap);
 }
 
+function renderFooter(){
+  const btnSave = $("#btn-save-remote");
+  if (!btnSave) return;
+  if (canEdit()){
+    btnSave.hidden = false;
+    btnSave.disabled = !state.hasLocalChanges || state.saving;
+    btnSave.classList.toggle("pending", state.hasLocalChanges && !state.saving);
+    btnSave.textContent = state.saving ? "Збереження…" : (state.hasLocalChanges ? "💾 Зберегти на сервер" : "✓ Синхронізовано");
+  } else {
+    btnSave.hidden = true;
+  }
+}
+
 function renderSchedule(child){
   if (!child.subjectColors) child.subjectColors = {};
   const card = mk("div", "card");
-  card.appendChild(mk("h3", null, "Розклад на тиждень — натисніть на картку для редагування, тягніть щоб перемістити"));
-  if (!child.slots.length){ card.appendChild(mk("div", "empty", "Немає уроків. Натисніть «Розклад дзвінків», щоб задати час.")); return card; }
+  card.appendChild(mk("h3", null, canEdit()
+    ? "Розклад на тиждень — натисніть на картку для редагування, тягніть щоб перемістити"
+    : "Розклад на тиждень"));
+  if (!child.slots.length){ card.appendChild(mk("div", "empty", "Немає уроків.")); return card; }
   const wrap = document.createElement("div"); wrap.className = "sched-table-wrapper";
   const table = document.createElement("table"); table.className = "sched-table";
   const thead = document.createElement("thead");
@@ -347,6 +474,8 @@ function renderSchedule(child){
 
   child.slots = normalizeSlots(child.slots);
   DAYS.forEach(d => { child.days[d] = normalizeDay(child.days[d]); });
+
+  const editable = canEdit();
 
   for (let si = 0; si < TOTAL_ROWS; si++){
     const slot = child.slots[si] || {};
@@ -369,40 +498,48 @@ function renderSchedule(child){
       if (val && (val.subject || val.room)){
         const color = val.color || getSubjectColor(child, val.subject);
         const lesson = document.createElement("div");
-        lesson.className = "lesson-card" + (isExtraRow(si) ? " extra-card" : "");
-        lesson.draggable = true;
+        lesson.className = "lesson-card" + (isExtraRow(si) ? " extra-card" : "") + (editable ? "" : " readonly");
+        lesson.draggable = editable;
         lesson.style.background = color;
         lesson.dataset.day = d; lesson.dataset.slot = String(si);
-        lesson.title = (val.subject || "") + (val.room ? " • " + val.room : "") + " — тягніть щоб перемістити";
+        lesson.title = (val.subject || "") + (val.room ? " • " + val.room : "") + (editable ? " — тягніть щоб перемістити" : "");
         const s1 = document.createElement("div"); s1.className = "lesson-subject"; s1.textContent = val.subject || "—";
         lesson.appendChild(s1);
         if (val.room){ const s2 = document.createElement("div"); s2.className = "lesson-room"; s2.textContent = "— " + val.room; lesson.appendChild(s2); }
-        lesson.addEventListener("click", () => openCellEditor(child.id, d, si));
-        lesson.addEventListener("dragstart", e => {
-          e.dataTransfer.setData("text/plain", JSON.stringify({ day: d, slot: si }));
-          e.dataTransfer.effectAllowed = "move";
-          dragSrc = { day: d, slot: si };
-          setTimeout(() => lesson.classList.add("dragging"), 0);
-        });
-        lesson.addEventListener("dragend", () => { lesson.classList.remove("dragging"); clearDragOver(); dragSrc = null; });
+        if (editable){
+          lesson.addEventListener("click", () => openCellEditor(child.id, d, si));
+          lesson.addEventListener("dragstart", e => {
+            e.dataTransfer.setData("text/plain", JSON.stringify({ day: d, slot: si }));
+            e.dataTransfer.effectAllowed = "move";
+            dragSrc = { day: d, slot: si };
+            setTimeout(() => lesson.classList.add("dragging"), 0);
+          });
+          lesson.addEventListener("dragend", () => { lesson.classList.remove("dragging"); clearDragOver(); dragSrc = null; });
+        }
         slotBox.appendChild(lesson);
       } else {
         const empty = document.createElement("button");
         empty.type = "button";
-        empty.className = "lesson-empty" + (isExtraRow(si) ? " extra-add" : "");
-        empty.textContent = isExtraRow(si) ? "+ Додати заняття" : "+ Додати урок";
-        empty.addEventListener("click", () => openCellEditor(child.id, d, si));
+        empty.className = "lesson-empty" + (isExtraRow(si) ? " extra-add" : "") + (editable ? "" : " readonly");
+        empty.textContent = editable ? (isExtraRow(si) ? "+ Додати заняття" : "+ Додати урок") : "—";
+        if (editable){
+          empty.addEventListener("click", () => openCellEditor(child.id, d, si));
+        } else {
+          empty.disabled = true;
+        }
         slotBox.appendChild(empty);
       }
-      slotBox.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; slotBox.classList.add("drag-over"); });
-      slotBox.addEventListener("dragleave", () => slotBox.classList.remove("drag-over"));
-      slotBox.addEventListener("drop", e => {
-        e.preventDefault(); slotBox.classList.remove("drag-over");
-        let src = dragSrc;
-        try { const p = JSON.parse(e.dataTransfer.getData("text/plain") || "null"); if (p && p.day) src = p; } catch(_){}
-        if (!src) return;
-        moveLesson(child.id, src.day, +src.slot, d, si);
-      });
+      if (editable){
+        slotBox.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; slotBox.classList.add("drag-over"); });
+        slotBox.addEventListener("dragleave", () => slotBox.classList.remove("drag-over"));
+        slotBox.addEventListener("drop", e => {
+          e.preventDefault(); slotBox.classList.remove("drag-over");
+          let src = dragSrc;
+          try { const p = JSON.parse(e.dataTransfer.getData("text/plain") || "null"); if (p && p.day) src = p; } catch(_){}
+          if (!src) return;
+          moveLesson(child.id, src.day, +src.slot, d, si);
+        });
+      }
       td.appendChild(slotBox); row.appendChild(td);
     });
     tbody.appendChild(row);
@@ -429,6 +566,7 @@ function renderListCard(child, kind, title){
   const card = mk("div", "card");
   card.appendChild(mk("h3", null, title));
   const list = document.createElement("div"); list.className = "list";
+  const editable = canEdit();
   (child[kind] || []).forEach(it => {
     const row = mk("div", "list-item"); row.style.color = child.color;
     const bar = mk("span", "bar"); bar.style.background = child.color;
@@ -436,19 +574,21 @@ function renderListCard(child, kind, title){
     if (kind === "homework"){
       txt.textContent = (it.subject ? it.subject + " — " : "") + (it.text || "");
       meta.textContent = (it.date || "") + (it.class ? " • " + it.class : "");
-      const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = !!it.done;
-      toggle.addEventListener("change", () => { it.done = toggle.checked; saveAndRender(); });
+      const toggle = document.createElement("input");
+      toggle.type = "checkbox"; toggle.checked = !!it.done;
+      toggle.disabled = !editable;
+      if (editable) toggle.addEventListener("change", () => { it.done = toggle.checked; saveAndRender(); });
       row.appendChild(toggle);
     } else {
       txt.textContent = (it.subject || "") + (it.text ? " — " + it.text : "");
       meta.textContent = (it.date || "") + (it.room ? " • " + it.room : "");
     }
     row.appendChild(bar); row.appendChild(txt); row.appendChild(meta);
-    row.appendChild(mk("button", "btn ghost", "…", () => openItemEditor(kind, it)));
+    if (editable) row.appendChild(mk("button", "btn ghost", "…", () => openItemEditor(kind, it)));
     list.appendChild(row);
   });
   card.appendChild(list);
-  card.appendChild(mk("button", "add-btn", "+ Додати", () => openItemEditor(kind)));
+  if (editable) card.appendChild(mk("button", "add-btn", "+ Додати", () => openItemEditor(kind)));
   return card;
 }
 
@@ -483,6 +623,7 @@ function buildPalette(child, current){
   }; }
 }
 function openCellEditor(childId, day, slotIdx){
+  if (!canEdit()) return;
   const child = state.data.children.find(c => c.id === childId);
   if (!child) return;
   if (!child.subjectColors) child.subjectColors = {};
@@ -527,14 +668,13 @@ function clearCell(){
 /* --- Дзвінки --- */
 let slotCtx = null;
 function openSlotEditor(){
+  if (!canEdit()) return;
   const child = activeChild(); if (!child) return;
   slotCtx = child;
   child.slots = normalizeSlots(child.slots);
   $("#slot-title").textContent = "Розклад дзвінків: " + child.name;
-
   const lessons = child.slots.slice(0, LESSON_COUNT);
   const extras = child.slots.slice(LESSON_COUNT, TOTAL_ROWS);
-
   const lessonsHtml = lessons.map((s, i) => `
     <div class="slot-row" data-kind="lesson" data-idx="${i}">
       <span class="slot-row-num">${i + 1}</span>
@@ -543,7 +683,6 @@ function openSlotEditor(){
       <input type="time" class="slot-end" value="${esc(s.end || '08:45')}">
     </div>
   `).join("");
-
   const extrasHtml = extras.map((s, i) => `
     <div class="slot-row extra" data-kind="extra" data-idx="${i}">
       <span class="slot-row-num">★${i + 1}</span>
@@ -553,16 +692,13 @@ function openSlotEditor(){
       <input type="time" class="slot-end" value="${esc(s.end || '17:00')}">
     </div>
   `).join("");
-
   const lList = $("#slot-lessons-list"); if (lList) lList.innerHTML = lessonsHtml;
   const eList = $("#slot-extras-list"); if (eList) eList.innerHTML = extrasHtml;
-
   show("modal-slots");
 }
 function commitSlots(){
   if (!slotCtx) return;
   const newSlots = [];
-
   document.querySelectorAll("#slot-lessons-list .slot-row").forEach((row, i) => {
     const st = row.querySelector(".slot-start");
     const en = row.querySelector(".slot-end");
@@ -572,7 +708,6 @@ function commitSlots(){
       end: (en && en.value) || "08:45"
     });
   });
-
   document.querySelectorAll("#slot-extras-list .slot-row").forEach((row, i) => {
     const lbl = row.querySelector(".slot-label");
     const st = row.querySelector(".slot-start");
@@ -584,7 +719,6 @@ function commitSlots(){
       end: (en && en.value) || (i === 0 ? "17:00" : "18:15")
     });
   });
-
   slotCtx.slots = normalizeSlots(newSlots);
   DAYS.forEach(d => { slotCtx.days[d] = normalizeDay(slotCtx.days[d]); });
   hide("modal-slots"); slotCtx = null; saveAndRender();
@@ -593,6 +727,7 @@ function commitSlots(){
 /* --- Домашка / контрольна --- */
 let itemCtx = { kind: null, childId: null, item: null };
 function openItemEditor(kind, item){
+  if (!canEdit()) return;
   const child = activeChild(); if (!child) return;
   itemCtx = { kind, childId: child.id, item: item || null };
   const isHw = kind === "homework";
@@ -641,6 +776,7 @@ function deleteItem(){
 
 /* --- Діти --- */
 function openChildModal(){
+  if (!canEdit()){ showToast("Спершу увімкніть режим редагування", "err"); return; }
   $("#modal-child-title").textContent = "Нова дитина";
   $("#child-name").value = ""; $("#child-class").value = ""; $("#child-color").value = "#4c8df6";
   show("modal-child"); focusField("child-name");
@@ -670,17 +806,87 @@ function confirmAsync(msg, onOk){
   show("modal-confirm");
 }
 
-/* ============ Експорт / імпорт ============ */
+/* ============ Налаштування (пароль) ============ */
+function openSettings(){
+  $("#set-password").value = state.password || "";
+  const s = $("#settings-status");
+  if (s){
+    if (canEdit()){
+      s.textContent = "✓ Режим редагування увімкнено";
+      s.className = "status ok";
+    } else {
+      s.textContent = "Режим перегляду";
+      s.className = "status";
+    }
+  }
+  show("modal-settings"); focusField("set-password");
+}
+async function saveSettings(){
+  const pw = $("#set-password").value.trim();
+  if (!pw){ showToast("Введіть пароль", "err"); return; }
+  // швидка перевірка: пробуємо зробити PUT з поточними даними
+  const oldPw = state.password;
+  state.password = pw;
+  const ok = await verifyPassword();
+  if (ok){
+    localStorage.setItem(LS_PASSWORD, pw);
+    const s = $("#settings-status");
+    if (s){ s.textContent = "✓ Пароль прийнято. Тепер ви можете редагувати."; s.className = "status ok"; }
+    hide("modal-settings");
+    refreshIndicator();
+    renderAll();
+    showToast("Режим редагування увімкнено ✔", "ok");
+  } else {
+    state.password = oldPw;
+    const s = $("#settings-status");
+    if (s){ s.textContent = "✗ Невірний пароль"; s.className = "status err"; }
+  }
+}
+async function verifyPassword(){
+  // Робимо PUT з поточними даними (без markDirty) — перевірка пароля.
+  // Якщо локальних змін немає — це просто «підтвердження» серверної версії з новим updatedAt.
+  try {
+    const res = await fetch(API_URL, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Edit-Password": state.password
+      },
+      body: JSON.stringify(state.data)
+    });
+    if (res.status === 401) return false;
+    if (!res.ok) return false;
+    const body = await res.json().catch(() => ({}));
+    if (body.updatedAt){
+      state.updatedAt = body.updatedAt;
+      localStorage.setItem(LS_UPDATED_AT, body.updatedAt);
+    }
+    if (state.hasLocalChanges) clearDirty();
+    return true;
+  } catch (e){
+    return false;
+  }
+}
+function doLogout(){
+  state.password = "";
+  localStorage.removeItem(LS_PASSWORD);
+  hide("modal-settings");
+  refreshIndicator();
+  renderAll();
+  showToast("Режим редагування вимкнено", "info");
+}
+
+/* ============ Експорт / імпорт (резервні) ============ */
 function doExport(){
   const blob = new Blob([JSON.stringify(state.data, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = REMOTE_FILE;
+  a.download = "schedule.json";
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  show("modal-export-info");
 }
 function doImport(file){
+  if (!canEdit()){ showToast("Спершу увімкніть режим редагування", "err"); return; }
   if (!file) return;
   file.text().then(text => {
     try {
@@ -689,14 +895,14 @@ function doImport(file){
         state.data = normalizeData(parsed);
         state.activeChildId = state.data.children.length ? state.data.children[0].id : null;
         saveAndRender();
-        alert("Імпорт успішно завершено ✔");
+        showToast("Імпорт успішно завершено ✔", "ok");
       } else {
-        alert("Некоректний формат файлу — відсутнє поле «children».");
+        showToast("Некоректний формат файлу", "err");
       }
     } catch (e){
-      alert("Помилка читання JSON: " + e.message);
+      showToast("Помилка JSON: " + e.message, "err");
     }
-  }).catch(e => alert("Помилка: " + e.message));
+  }).catch(e => showToast("Помилка: " + e.message, "err"));
 }
 
 /* ============ Бічне меню ============ */
@@ -706,6 +912,7 @@ function buildSidebar(){
     ["Додати дитину", openChildModal],
     ["Розклад дзвінків", openSlotEditor],
     ["Оновити з сервера", reloadFromRemote],
+    ["Режим редагування", openSettings],
     ["Експорт JSON", doExport],
     ["Імпорт JSON", () => $("#import-file").click()]
   ];
@@ -713,33 +920,6 @@ function buildSidebar(){
 }
 function openSidebar(){ $("#scrim").hidden = false; const s = $("#sidebar"); s.hidden = false; setTimeout(() => s.classList.add("open"), 10); }
 function closeSidebar(){ const s = $("#sidebar"); s.classList.remove("open"); setTimeout(() => { $("#scrim").hidden = true; if (s) s.hidden = true; }, 200); }
-
-/* ============ Оновлення застосунку (Service Worker) ============ */
-function showUpdateToast(){
-  if (document.getElementById("update-toast")) return;
-  const t = document.createElement("div");
-  t.className = "update-toast"; t.id = "update-toast";
-  t.innerHTML = '<span>Доступна нова версія розкладу</span>';
-  const btn = document.createElement("button");
-  btn.textContent = "Оновити";
-  btn.addEventListener("click", () => location.reload());
-  t.appendChild(btn);
-  document.body.appendChild(t);
-}
-function registerServiceWorker(){
-  if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("sw.js").then(reg => {
-    reg.addEventListener("updatefound", () => {
-      const sw = reg.installing;
-      if (!sw) return;
-      sw.addEventListener("statechange", () => {
-        if (sw.state === "installed" && navigator.serviceWorker.controller){
-          showUpdateToast();
-        }
-      });
-    });
-  }).catch(e => console.warn("SW register failed:", e));
-}
 
 /* ============ Прив'язка обробників ============ */
 function wireEvents(){
@@ -763,20 +943,38 @@ function wireEvents(){
   c("btn-confirm-ok", () => { hide("modal-confirm"); const cb = confirmCb; confirmCb = null; if (cb) cb(); });
   c("btn-confirm-no", () => { hide("modal-confirm"); confirmCb = null; });
 
+  c("btn-save-settings", saveSettings);
+  c("btn-logout", doLogout);
+
+  c("btn-save-remote", pushRemote);
+  c("btn-reload-remote", reloadFromRemote);
   c("btn-export", doExport);
   c("btn-import", () => $("#import-file").click());
-  c("btn-reload-remote", reloadFromRemote);
-  c("btn-export-info-ok", () => hide("modal-export-info"));
 
   c("btn-menu", openSidebar);
   c("btn-sidebar-close", closeSidebar);
   const scrim = $("#scrim"); if (scrim) scrim.addEventListener("click", closeSidebar);
   const importFile = $("#import-file"); if (importFile) importFile.addEventListener("change", e => doImport(e.target.files[0]));
+
+  // Ctrl/Cmd+S — швидке збереження на сервер
+  window.addEventListener("keydown", e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "s"){
+      e.preventDefault();
+      if (canEdit() && state.hasLocalChanges) pushRemote();
+    }
+  });
+
+  // Попередження при закритті вкладки з незбереженими змінами
+  window.addEventListener("beforeunload", e => {
+    if (state.hasLocalChanges && canEdit()){
+      e.preventDefault();
+      e.returnValue = "";
+    }
+  });
 }
 
 window.addEventListener("DOMContentLoaded", () => {
   wireEvents();
   buildSidebar();
   loadAll();
-  registerServiceWorker();
 });
