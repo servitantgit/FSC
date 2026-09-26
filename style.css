@@ -402,3 +402,51 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
   from{opacity:0;transform:translate(-50%,20px)}
   to{opacity:1;transform:translate(-50%,0)}
 }
+
+/* ===== Друк ===== */
+/* У друк потрапляє лише таблиця розкладу: білий фон і чорний текст
+   замість темної теми; кольори предметів на картках зберігаються. */
+@media print{
+  @page{size:A4 landscape;margin:8mm}
+
+  /* Світла тема замість темної */
+  html,body{background:#fff !important;color:#111 !important;height:auto}
+  .app{display:block;max-width:none;gap:0;padding:0}
+
+  /* Ховаємо весь інтерфейс — лишаємо тільки картку розкладу */
+  .topbar,.footer-actions,.sidebar,.scrim,.modal,.toast,.update-toast,.clipboard-hint,.card--list{display:none !important}
+
+  /* Картка розкладу — без фону, рамок і заголовка-підказки */
+  .card,.card--schedule,.sched-table-wrapper{background:#fff !important;border:none !important;border-radius:0 !important;box-shadow:none !important;padding:0 !important}
+  .card--schedule>h3{display:none !important}
+  .sched-sections{gap:8px}
+  .sched-section__title{color:#555 !important;margin:0 0 3px;page-break-after:avoid;break-after:avoid}
+  .sched-section__title--weekend{color:#8a6200 !important;opacity:1}
+
+  /* Таблиця: без скролу й мінімальної ширини; кольори друкуються як є.
+     Легке ущільнення — щоб тиждень уміщався на один аркуш A4 (landscape) */
+  .sched-table-wrapper{overflow:visible !important}
+  .sched-table{min-width:0 !important;width:100% !important;border-spacing:2px}
+  .sched-table--weekend{max-width:none !important}
+  .sched-table th,.sched-table td,.sched-table .lesson-card,.sched-table .lesson-empty,.sched-table .room-badge{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+
+  /* Шапка, колонка часу та рамки — світлі, текст чорний */
+  .sched-table th{padding:3px 5px;background:#eef2f7 !important;border:1px solid #9aa4b2 !important;color:#111 !important}
+  .sched-table th.weekend-th{color:#8a6200 !important;opacity:1}
+  .sched-table td.time-cell{padding:3px 6px;line-height:1.15;background:#f4f6fa !important;border:1px solid #9aa4b2 !important;color:#111 !important}
+  .sched-table td.time-cell .slot-hours,.sched-table td.time-cell .slot-kind{color:#555 !important;font-size:10px}
+  .sched-table tr.extra-row .time-cell{background:#fff7e8 !important;border-color:#dcb26a !important}
+  .sched-table tr.extra-row .time-cell .slot-num,
+  .sched-table tr.extra-row .time-cell .slot-kind{color:#8a6200 !important}
+  .sched-table tr{page-break-inside:avoid;break-inside:avoid}
+
+  /* Картки уроків: фон — колір предмета, текст чорний */
+  .lesson-card{padding:5px 8px;min-height:40px;border:1px solid rgba(0,0,0,.35) !important;box-shadow:none !important;page-break-inside:avoid;break-inside:avoid}
+  .lesson-subject,.lesson-teacher,.time-badge{color:#111 !important}
+  .room-badge{background:#1b1b1b !important;color:#fff !important;box-shadow:none !important}
+  .sched-table tr.extra-row .lesson-card.extra-card{border-color:#dcb26a !important;box-shadow:none !important}
+
+  /* Порожні клітинки — без підказок «+ Додати урок» */
+  .cell-slot{min-height:40px}
+  .lesson-empty,.cell-blocked{background:#fff !important;border:1px dashed #d6dbe4 !important;color:transparent !important;min-height:40px;opacity:1 !important}
+}

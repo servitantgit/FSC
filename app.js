@@ -489,7 +489,7 @@ function renderFooter(){
 
 function renderSchedule(child){
   if (!child.subjectColors) child.subjectColors = {};
-  const card = mk("div", "card");
+  const card = mk("div", "card card--schedule");
   card.appendChild(mk("h3", null, canEdit()
     ? "Розклад на тиждень — натисніть на картку для редагування, тягніть щоб перемістити"
     : "Розклад на тиждень"));
@@ -823,7 +823,7 @@ function cloneLesson(childId, fromDay, fromSlot, toDay, toSlot){
 }
 
 function renderListCard(child, kind, title){
-  const card = mk("div", "card");
+  const card = mk("div", "card card--list");
   card.appendChild(mk("h3", null, title));
   const list = document.createElement("div"); list.className = "list";
   const editable = canEdit();
@@ -1214,6 +1214,7 @@ function buildSidebar(){
     ["Додати дитину", openChildModal],
     ["Розклад дзвінків", openSlotEditor],
     ["Оновити з сервера", reloadFromRemote],
+    ["🖨 Друк розкладу", printSchedule],
     ["Режим редагування", openSettings],
     ["📱 Встановити застосунок", triggerInstallPrompt],
     ["Експорт JSON", doExport],
@@ -1352,10 +1353,36 @@ function triggerInstallPrompt(){
   });
 }
 
+/* ============ Друк ============ */
+/* У друк потрапляє лише таблиця розкладу (див. @media print у style.css):
+   білий фон, чорний текст, збережені кольори предметів. */
+const BASE_TITLE = document.title;
+
+function printSchedule(){
+  if (!activeChild()){
+    showToast("Немає розкладу для друку", "err");
+    return;
+  }
+  try {
+    window.print();
+  } catch (e){
+    showToast("Не вдалося відкрити друк: " + e.message, "err");
+  }
+}
+
 /* ============ Обробники ============ */
 function wireEvents(){
   const c = (id, fn) => { const el = $("#" + id); if (el) el.addEventListener("click", fn); };
   c("btn-add-child", openChildModal);
+  c("btn-print", printSchedule);
+  // Заголовок документа потрапляє в колонтитул друку — підставляємо ім'я дитини
+  window.addEventListener("beforeprint", () => {
+    const child = activeChild();
+    document.title = child
+      ? "Розклад — " + child.name + (child.class ? " (" + child.class + ")" : "")
+      : BASE_TITLE;
+  });
+  window.addEventListener("afterprint", () => { document.title = BASE_TITLE; });
   c("btn-save-child", saveChild);
   c("btn-cancel-child", () => hide("modal-child"));
   c("btn-save-cell", commitCell);
