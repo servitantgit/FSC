@@ -59,10 +59,6 @@ def blend(dst, src):
     )
 
 
-def inside_circle(x, y, cx, cy, r):
-    return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
-
-
 def inside_rounded_rect(x, y, x0, y0, x1, y1, r):
     if x < x0 or x > x1 or y < y0 or y > y1:
         return False
@@ -72,8 +68,26 @@ def inside_rounded_rect(x, y, x0, y0, x1, y1, r):
 
 
 # ---------- Гліф літери «Р» ----------
-# Малюємо літеру Р геометрично: вертикальна планка + напівовал зверху.
-# Координати задаються у відсотках від area (внутрішнього квадрата гліфа).
+# Конструкція: вертикальна ніжка на всю висоту + петля-«стадіон»
+# (пряма ліва сторона, півколо праворуч) з отвором такої самої форми,
+# що дає рівномірну товщину штриха по всьому контуру петлі.
+
+def inside_stadium(x, y, x0, y0, x1, y1):
+    """Форма з прямою лівою стороною і напівколом праворуч.
+    Прямокутник [x0,x1]x[y0,y1], права межа заокруглена радіусом (y1-y0)/2.
+    """
+    if y1 <= y0 or x1 <= x0:
+        return False
+    r = (y1 - y0) / 2.0
+    cy = (y0 + y1) / 2.0
+    straight_x1 = x1 - r
+    if x < x0:
+        return False
+    if x <= straight_x1:
+        return y0 <= y <= y1
+    cx = straight_x1
+    return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
+
 
 def inside_letter_R(px, py, x0, y0, size):
     """px,py — глобальні пікселі; x0,y0,size — область для літери."""
@@ -83,33 +97,27 @@ def inside_letter_R(px, py, x0, y0, size):
     if u < 0 or u > 1 or v < 0 or v > 1:
         return False
 
-    # Вертикальна планка ліворуч
-    stem_left = 0.18
-    stem_right = 0.38
-    if stem_left <= u <= stem_right and 0.05 <= v <= 0.95:
+    # Вертикальна ніжка на всю висоту
+    stem_left = 0.20
+    stem_right = 0.40
+    if stem_left <= u <= stem_right and 0.02 <= v <= 0.98:
         return True
 
-    # Верхня «голова» — овальне кільце
-    head_cx = 0.50
-    head_cy = 0.30
-    head_rx_out = 0.36
-    head_ry_out = 0.28
-    head_rx_in = 0.18
-    head_ry_in = 0.13
+    # Петля (bowl) зверху: зовнішній і внутрішній «стадіон»
+    # з однаковою товщиною штриха по всьому контуру.
+    bowl_top = 0.03
+    bowl_bottom = 0.58
+    outer_right = 0.85
+    stroke = 0.17
 
-    du = (u - head_cx) / head_rx_out
-    dv = (v - head_cy) / head_ry_out
-    outer = du * du + dv * dv <= 1.0
-    du_i = (u - head_cx) / head_rx_in
-    dv_i = (v - head_cy) / head_ry_in
-    inner = du_i * du_i + dv_i * dv_i <= 1.0
+    outer = inside_stadium(u, v, stem_left, bowl_top, outer_right, bowl_bottom)
+    inner = inside_stadium(
+        u, v,
+        stem_right, bowl_top + stroke,
+        outer_right - stroke, bowl_bottom - stroke,
+    )
 
-    # Верхня частина овалу (щоб не з'єднувалась із «ніжкою»)
-    if outer and not inner and v <= head_cy + head_ry_out * 0.9:
-        return True
-
-    # З'єднання овалу з планкою по низу голови
-    if 0.18 <= u <= 0.55 and 0.42 <= v <= 0.52:
+    if outer and not inner:
         return True
 
     return False
