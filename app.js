@@ -2,7 +2,8 @@
    Family School Web — дитячий розклад
    Cloudflare Pages + KV варіант
    Оновлення:
-     - вихідні (Сб/Нд): уроки заблоковані, гуртки доступні
+     - Пн–Пт — головна таблиця; Сб/Нд — окрема таблиця нижче (лише гуртки, по 2 слоти)
+     - колір прив'язаний до предмета: зміна кольору оновлює всі клітинки цього предмета
      - кабінет — окремий бейдж у куті картки
      - вчитель/тренер — окреме поле
      - гуртки мають власний час (в самій клітинці)
@@ -11,7 +12,9 @@
 
 /* ---------- Константи ---------- */
 const DAYS = ["mon","tue","wed","thu","fri","sat","sun"];
-const WEEKEND_DAYS = new Set(["sat","sun"]);
+const WORKDAYS = ["mon","tue","wed","thu","fri"];
+const WEEKEND_LIST = ["sat","sun"];
+const WEEKEND_DAYS = new Set(WEEKEND_LIST);
 const DAY_FULL = {mon:"Понеділок",tue:"Вівторок",wed:"Середа",thu:"Четвер",fri:"П'ятниця",sat:"Субота",sun:"Неділя"};
 const LS_DATA = "fsc.data.v1";
 const LS_DIRTY = "fsc.dirty.v1";
@@ -193,6 +196,16 @@ function normalizeData(data){
         if (v && v.subject && v.color){
           const k = normSubject(v.subject);
           if (k && !ch.subjectColors[k]) ch.subjectColors[k] = { name: v.subject.trim(), color: v.color };
+        }
+      });
+    });
+    // Єдине джерело правди для кольору — subjectColors: вирівнюємо колір
+    // у клітинках, щоб він не «відв'язувався» від кольору предмета
+    DAYS.forEach(d => {
+      (ch.days[d] || []).forEach(v => {
+        if (v && v.subject){
+          const k = normSubject(v.subject);
+          if (k && ch.subjectColors[k]) v.color = ch.subjectColors[k].color;
         }
       });
     });
@@ -481,13 +494,42 @@ function renderSchedule(child){
     ? "Розклад на тиждень — натисніть на картку для редагування, тягніть щоб перемістити"
     : "Розклад на тиждень"));
   if (!child.slots.length){ card.appendChild(mk("div", "empty", "Немає уроків.")); return card; }
-  const wrap = document.createElement("div"); wrap.className = "sched-table-wrapper";
-  const table = document.createElement("table"); table.className = "sched-table";
+  child.slots = normalizeSlots(child.slots);
+  DAYS.forEach(d => { child.days[d] = normalizeDay(child.days[d]); });
+  const editable = canEdit();
+
+  const allRows = [];
+  for (let i = 0; i < TOTAL_ROWS; i++) allRows.push(i);
+  const extraRows = [];
+  for (let i = LESSON_COUNT; i < TOTAL_ROWS; i++) extraRows.push(i);
+
+  const sections = document.createElement("div");
+  sections.className = "sched-sections";
+
+  // Головна таблиця: Понеділок – П'ятниця (8 уроків + 2 гуртки)
+  sections.appendChild(mk("div", "sched-section__title", "Понеділок – П'ятниця"));
+  sections.appendChild(buildScheduleTable(child, WORKDAYS, allRows, editable));
+
+  // Окрема таблиця вихідних: Субота й Неділя — лише гуртки (по 2 слоти)
+  sections.appendChild(mk("div", "sched-section__title sched-section__title--weekend", "Вихідні — гуртки та секції"));
+  sections.appendChild(buildScheduleTable(child, WEEKEND_LIST, extraRows, editable, { weekend: true, cornerLabel: "Гурток" }));
+
+  card.appendChild(sections);
+  return card;
+}
+
+/* Таблиця розкладу для заданого набору днів і рядків (Пн–Пт або вихідні) */
+function buildScheduleTable(child, dayKeys, slotIdxs, editable, opts){
+  opts = opts || {};
+  const wrap = document.createElement("div");
+  wrap.className = "sched-table-wrapper" + (opts.weekend ? " sched-table-wrapper--weekend" : "");
+  const table = document.createElement("table");
+  table.className = "sched-table" + (opts.weekend ? " sched-table--weekend" : "");
 
   const thead = document.createElement("thead");
   const hr = document.createElement("tr");
-  const corner = document.createElement("th"); corner.className = "time-col-header"; corner.textContent = "№ / години"; hr.appendChild(corner);
-  DAYS.forEach(d => {
+  const corner = document.createElement("th"); corner.className = "time-col-header"; corner.textContent = opts.cornerLabel || "№ / години"; hr.appendChild(corner);
+  dayKeys.forEach(d => {
     const th = document.createElement("th");
     th.textContent = DAY_FULL[d];
     if (isWeekend(d)) th.classList.add("weekend-th");
@@ -496,11 +538,8 @@ function renderSchedule(child){
   thead.appendChild(hr); table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
-  child.slots = normalizeSlots(child.slots);
-  DAYS.forEach(d => { child.days[d] = normalizeDay(child.days[d]); });
-  const editable = canEdit();
 
-  for (let si = 0; si < TOTAL_ROWS; si++){
+  slotIdxs.forEach(si => {
     const slot = child.slots[si] || {};
     const row = document.createElement("tr");
     const isExtra = isExtraRow(si);
@@ -520,7 +559,7 @@ function renderSchedule(child){
     row.appendChild(time);
 
     // Клітинки по днях
-    DAYS.forEach(d => {
+    dayKeys.forEach(d => {
       const td = document.createElement("td");
       const slotBox = document.createElement("div");
       slotBox.className = "cell-slot" + (isExtra ? " extra-slot" : "");
@@ -646,9 +685,9 @@ function renderSchedule(child){
       td.appendChild(slotBox); row.appendChild(td);
     });
     tbody.appendChild(row);
-  }
-  table.appendChild(tbody); wrap.appendChild(table); card.appendChild(wrap);
-  return card;
+  });
+  table.appendChild(tbody); wrap.appendChild(table);
+  return wrap;
 }
 
 let dragSrc = null;
