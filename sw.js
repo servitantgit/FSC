@@ -12,7 +12,7 @@
 
 /* ⚠️ ЗМІНЮЙТЕ ВЕРСІЮ при кожному релізі — це змусить браузер
    витягнути свіжий кеш замість використовувати старий. */
-const VERSION = 'v1.0.1';
+const VERSION = 'v1.0.2';
 const SHELL_CACHE = 'fsc-shell-' + VERSION;
 const DATA_CACHE = 'fsc-data-' + VERSION;
 

@@ -70,6 +70,64 @@ body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-s
 .sched-table.sched-table--weekend{min-width:320px;max-width:560px}
 .sched-table-wrapper--weekend{background:rgba(230,162,60,0.04);border-color:rgba(230,162,60,0.22)}
 
+/* ===== Шапка розкладу: заголовок, дні, «сьогодні» та стан «зараз» — в один рядок ===== */
+.sched-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:0 0 10px}
+.sched-head h3.sched-head__title{margin:0;font-size:15px;font-weight:700;color:var(--text);text-transform:none;letter-spacing:.2px}
+.sched-head__week{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.sched-head__hint{font-size:11px;color:var(--muted);opacity:.85}
+
+/* Бейдж «Сьогодні»: реальна дата + поточний час пристрою */
+.today-badge{display:inline-flex;align-items:baseline;gap:7px;padding:3px 10px;border-radius:20px;border:1px solid var(--line);background:var(--panel2);font-size:12px;color:var(--text);white-space:nowrap}
+.today-badge .tb-day{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--accent)}
+.today-badge .tb-clock{font-weight:700;font-variant-numeric:tabular-nums}
+
+/* Плашка стану: «Зараз: …» / «Далі: …» / завершено */
+.now-status{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;border:1px solid var(--line);background:transparent;font-size:12px;font-weight:600;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.now-status:empty{display:none}
+.now-status.is-now{border-color:rgba(255,255,255,.85);background:rgba(255,255,255,.14);color:#fff;box-shadow:0 0 12px rgba(255,255,255,.28)}
+.now-status.is-next{border-color:rgba(255,255,255,.4);color:var(--text)}
+
+/* ===== «Сьогодні»: білий муар на клітинці актуального дня тижня ===== */
+@keyframes moire-sweep{
+  from{background-position:0% 50%}
+  to{background-position:200% 50%}
+}
+.sched-table th.today-th{
+  color:#0f1420;
+  background-color:rgba(255,255,255,.9);
+  border-color:rgba(255,255,255,.95);
+  background-image:linear-gradient(110deg,rgba(255,255,255,.32) 0%,#fff 18%,rgba(255,255,255,.5) 36%,#fff 54%,rgba(255,255,255,.32) 72%,#fff 90%,rgba(255,255,255,.32) 100%);
+  background-size:200% 100%;
+  animation:moire-sweep 5.5s linear infinite;
+  text-shadow:0 1px 0 rgba(255,255,255,.75);
+  box-shadow:0 0 14px rgba(255,255,255,.45),inset 0 0 10px rgba(255,255,255,.6);
+}
+.sched-table th.today-th.weekend-th{color:#0f1420;opacity:1}
+.th-today{display:none;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;margin-top:2px;opacity:.8}
+.sched-table th.today-th .th-today{display:block}
+/* Стовпець сьогоднішнього дня — легкий білий фон */
+.sched-table td.today-col{background:rgba(255,255,255,.045);border-radius:8px}
+
+/* ===== Актуальний урок: підсвітка клітинки з часом і самої картки уроку ===== */
+@keyframes now-pulse{
+  0%,100%{box-shadow:0 0 0 2px rgba(255,255,255,.95),0 0 12px rgba(255,255,255,.4)}
+  50%{box-shadow:0 0 0 3px #fff,0 0 22px rgba(255,255,255,.75)}
+}
+.lesson-card.is-now{outline:2px solid #fff;outline-offset:-2px;animation:now-pulse 2.6s ease-in-out infinite;z-index:2}
+.lesson-card.is-next{outline:2px dashed rgba(255,255,255,.6);outline-offset:-2px}
+.sched-table td.time-cell.time-cell--now{border-color:#fff;background:rgba(255,255,255,.14);color:#fff;box-shadow:0 0 12px rgba(255,255,255,.3)}
+.sched-table td.time-cell.time-cell--now .slot-num{color:#fff}
+.sched-table td.time-cell.time-cell--now .slot-hours{color:rgba(255,255,255,.85)}
+.sched-table td.time-cell.time-cell--now .slot-kind{color:rgba(255,255,255,.7)}
+.sched-table td.time-cell.time-cell--next{border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.06)}
+.now-flag{align-self:flex-start;margin-bottom:4px;padding:1px 6px;border-radius:8px;background:rgba(0,0,0,.65);color:#fff;font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;pointer-events:none}
+
+/* Поважаємо системне налаштування «менше руху» */
+@media (prefers-reduced-motion:reduce){
+  .sched-table th.today-th{animation:none}
+  .lesson-card.is-now{animation:none}
+}
+
 /* ===== Lesson card ===== */
 .lesson-card{display:flex;flex-direction:column;justify-content:center;min-height:56px;height:100%;width:100%;padding:7px 10px;border-radius:8px;border:1px solid rgba(0,0,0,0.15);cursor:grab;user-select:none;text-align:left;position:relative;transition:transform .12s ease,box-shadow .12s ease,opacity .15s ease}
 .lesson-card:hover{filter:brightness(1.06);box-shadow:0 3px 10px rgba(0,0,0,0.25)}
@@ -213,6 +271,13 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
 
   /* Таблиця вихідних — тримається в межах екрана, без горизонтального скролу */
   .sched-table.sched-table--weekend{min-width:300px;max-width:100%}
+
+  /* Шапка розкладу — компактніша, в один рядок */
+  .sched-head{gap:5px 8px;margin-bottom:8px}
+  .sched-head h3.sched-head__title{font-size:14px}
+  .sched-head__hint{display:none}
+  .today-badge,.now-status{font-size:11px;padding:2px 8px}
+  .th-today{font-size:8px}
 
   /* Картки уроків — компактніше */
   .lesson-card,.lesson-empty,.cell-blocked{min-height:48px}
@@ -419,6 +484,14 @@ h2{font-size:18px;margin:0 0 12px;font-weight:700}
   /* Картка розкладу — без фону, рамок і заголовка-підказки */
   .card,.card--schedule,.sched-table-wrapper{background:#fff !important;border:none !important;border-radius:0 !important;box-shadow:none !important;padding:0 !important}
   .card--schedule>h3{display:none !important}
+  /* Шапка розкладу в друці — лише заголовок і діапазон днів (без «сьогодні» й підсвіток) */
+  .sched-head{display:block !important;margin:0 0 6px}
+  .sched-head h3.sched-head__title{display:inline !important;color:#111 !important;text-transform:none !important}
+  .sched-head__week{color:#555 !important;margin-left:6px}
+  .today-badge,.now-status,.sched-head__hint,.now-flag,.th-today{display:none !important}
+  .lesson-card.is-now,.lesson-card.is-next{outline:none !important;animation:none !important}
+  .sched-table th.today-th{background-image:none !important;animation:none !important}
+  .sched-table td.today-col{background:#fff !important}
   .sched-sections{gap:8px}
   .sched-section__title{color:#555 !important;margin:0 0 3px;page-break-after:avoid;break-after:avoid}
   .sched-section__title--weekend{color:#8a6200 !important;opacity:1}

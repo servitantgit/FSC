@@ -30,6 +30,11 @@ const EXTRA_COUNT = 2;
 const TOTAL_ROWS = LESSON_COUNT + EXTRA_COUNT;
 const DEFAULT_EXTRA_START = "16:00";
 const DEFAULT_EXTRA_END = "17:00";
+
+/* ---------- «Зараз» у розкладі: день тижня, поточний урок, час ---------- */
+const JS_DAY_KEYS = ["sun","mon","tue","wed","thu","fri","sat"]; // Date.getDay() → ключ дня
+const UA_MONTHS = ["січня","лютого","березня","квітня","травня","червня","липня","серпня","вересня","жовтня","листопада","грудня"];
+const NOW_TICK_MS = 30000; // як часто перераховується підсвітка «зараз» (30 с)
 /* ---------- Буфер обміну карток ---------- */
 const clipboardState = {
   cell: null,          // копія об'єкта клітинки
@@ -54,6 +59,44 @@ function todayISO(){
   const d = new Date();
   const p = n => String(n).padStart(2, "0");
   return d.getFullYear() + "-" + p(d.getMonth()+1) + "-" + p(d.getDate());
+}
+function pad2(n){ return String(n).padStart(2, "0"); }
+/* "HH:MM" → хвилини від початку доби; null — якщо часу немає або він некоректний */
+function timeToMinutes(value){
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || "").trim());
+  if (!m) return null;
+  const h = Number(m[1]), mi = Number(m[2]);
+  if (h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
+/* хвилини → "HH:MM" (для підпису поточного часу) */
+function minutesToClock(minutes){
+  const norm = ((minutes % 1440) + 1440) % 1440;
+  return pad2(Math.floor(norm / 60)) + ":" + pad2(norm % 60);
+}
+function nowMinutes(){ const d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
+/* Ключ дня тижня за реальною датою пристрою: "mon" … "sun" */
+function todayKey(){ return JS_DAY_KEYS[new Date().getDay()]; }
+/* «п'ятниця, 26 вересня 2026» — щоб дату було видно без окремого календаря */
+function todayLabel(){
+  const d = new Date();
+  return DAY_FULL[JS_DAY_KEYS[d.getDay()]].toLowerCase() + ", " +
+    d.getDate() + " " + UA_MONTHS[d.getMonth()] + " " + d.getFullYear();
+}
+/* Серед занять дня ({start,end} у хвилинах) обирає те, що триває зараз,
+   інакше — найближче наступне. Межа кінця уроку належить наступному заняттю. */
+function pickCurrentLesson(items, minutes){
+  let current = null, next = null;
+  items.forEach(it => {
+    const s = it.start, e = it.end;
+    if (s === null || s === undefined || e === null || e === undefined || e <= s) return;
+    if (minutes >= s && minutes < e){
+      if (!current || s < current.start) current = it;
+    } else if (s > minutes){
+      if (!next || s < next.start) next = it;
+    }
+  });
+  return { current, next };
 }
 function canEdit(){ return !!state.password; }
 function isExtraRow(i){ return i >= LESSON_COUNT; }
@@ -467,6 +510,7 @@ function renderContent(){
   wrap.appendChild(renderListCard(child, "homework", "Домашні завдання"));
   wrap.appendChild(renderListCard(child, "exams", "Контрольні та іспити"));
   main.appendChild(wrap);
+  updateNowMarkers();
 }
 
 function renderFooter(){
@@ -487,12 +531,34 @@ function renderFooter(){
   }
 }
 
+/* Шапка розкладу — один рядок: заголовок, діапазон днів, «сьогодні» та стан «зараз» */
+function buildScheduleHead(editable){
+  const head = document.createElement("div");
+  head.className = "sched-head";
+
+  const title = document.createElement("h3");
+  title.className = "sched-head__title";
+  title.textContent = "Розклад на тиждень";
+  head.appendChild(title);
+
+  head.appendChild(mk("span", "sched-head__week", "Понеділок – П'ятниця"));
+
+  const today = mk("span", "today-badge", "");
+  today.title = "Дата й час цього пристрою";
+  head.appendChild(today);
+
+  head.appendChild(mk("span", "now-status", ""));
+
+  if (editable){
+    head.appendChild(mk("span", "sched-head__hint", "натисніть на картку, щоб редагувати · тягніть, щоб перемістити"));
+  }
+  return head;
+}
+
 function renderSchedule(child){
   if (!child.subjectColors) child.subjectColors = {};
   const card = mk("div", "card card--schedule");
-  card.appendChild(mk("h3", null, canEdit()
-    ? "Розклад на тиждень — натисніть на картку для редагування, тягніть щоб перемістити"
-    : "Розклад на тиждень"));
+  card.appendChild(buildScheduleHead(canEdit()));
   if (!child.slots.length){ card.appendChild(mk("div", "empty", "Немає уроків.")); return card; }
   child.slots = normalizeSlots(child.slots);
   DAYS.forEach(d => { child.days[d] = normalizeDay(child.days[d]); });
@@ -506,8 +572,8 @@ function renderSchedule(child){
   const sections = document.createElement("div");
   sections.className = "sched-sections";
 
-  // Головна таблиця: Понеділок – П'ятниця (8 уроків + 2 гуртки)
-  sections.appendChild(mk("div", "sched-section__title", "Понеділок – П'ятниця"));
+  // Головна таблиця: Понеділок – П'ятниця (8 уроків + 2 гуртки).
+  // Підпис «Понеділок – П'ятниця» винесено в шапку картки (buildScheduleHead).
   sections.appendChild(buildScheduleTable(child, WORKDAYS, allRows, editable));
 
   // Окрема таблиця вихідних: Субота й Неділя — лише гуртки (по 2 слоти)
@@ -531,7 +597,14 @@ function buildScheduleTable(child, dayKeys, slotIdxs, editable, opts){
   const corner = document.createElement("th"); corner.className = "time-col-header"; corner.textContent = opts.cornerLabel || "№ / години"; hr.appendChild(corner);
   dayKeys.forEach(d => {
     const th = document.createElement("th");
-    th.textContent = DAY_FULL[d];
+    th.dataset.day = d;
+    const name = document.createElement("span");
+    name.className = "th-day";
+    name.textContent = DAY_FULL[d];
+    const todayMark = document.createElement("span");
+    todayMark.className = "th-today";
+    todayMark.textContent = "Сьогодні";
+    th.appendChild(name); th.appendChild(todayMark);
     if (isWeekend(d)) th.classList.add("weekend-th");
     hr.appendChild(th);
   });
@@ -548,6 +621,8 @@ function buildScheduleTable(child, dayKeys, slotIdxs, editable, opts){
     // Ліва колонка часу
     const time = document.createElement("td");
     time.className = "time-cell" + (isExtra ? " extra-time" : "");
+    time.dataset.slot = String(si);
+    if (!isExtra){ time.dataset.start = slot.start || ""; time.dataset.end = slot.end || ""; }
     const numTxt = slot.num || String(si + 1);
     if (isExtra){
       // Для гуртків час у лівій колонці НЕ показуємо (він у самій картці)
@@ -561,9 +636,12 @@ function buildScheduleTable(child, dayKeys, slotIdxs, editable, opts){
     // Клітинки по днях
     dayKeys.forEach(d => {
       const td = document.createElement("td");
+      td.dataset.col = d;
       const slotBox = document.createElement("div");
       slotBox.className = "cell-slot" + (isExtra ? " extra-slot" : "");
       slotBox.dataset.day = d; slotBox.dataset.slot = String(si);
+      slotBox.dataset.kind = isExtra ? "extra" : "lesson";
+      slotBox.dataset.num = String(slot.num || (si + 1));
 
       const blocked = isBlockedCell(d, si);
 
@@ -575,6 +653,10 @@ function buildScheduleTable(child, dayKeys, slotIdxs, editable, opts){
       } else {
         const val = child.days[d] && child.days[d][si];
         if (val && (val.subject || val.room || val.teacher)){
+          // Час заняття для підсвітки «зараз»: уроки — з дзвінків, гуртки — з картки
+          slotBox.dataset.start = isExtra ? (val.start || "") : (slot.start || "");
+          slotBox.dataset.end = isExtra ? (val.end || "") : (slot.end || "");
+          if (val.subject) slotBox.dataset.subject = val.subject;
           const color = (val.subject ? getSubjectColor(child, val.subject) : null) || val.color || DEFAULT_SUBJECT_COLOR;
           const lesson = document.createElement("div");
           lesson.className = "lesson-card" + (isExtra ? " extra-card" : "") + (editable ? "" : " readonly");
@@ -632,6 +714,8 @@ function buildScheduleTable(child, dayKeys, slotIdxs, editable, opts){
           }
           slotBox.appendChild(lesson);
         } else {
+          slotBox.dataset.start = "";
+          slotBox.dataset.end = "";
           const empty = document.createElement("button");
           empty.type = "button";
           empty.className = "lesson-empty" + (isExtra ? " extra-add" : "") + (editable ? "" : " readonly");
@@ -688,6 +772,119 @@ function buildScheduleTable(child, dayKeys, slotIdxs, editable, opts){
   });
   table.appendChild(tbody); wrap.appendChild(table);
   return wrap;
+}
+
+/* ============ «Зараз»: підсвітка дня тижня та актуального заняття ============
+   Підсвітка рахується з data-атрибутів таблиці, тому оновлюється без
+   повного ре-рендеру: раз на NOW_TICK_MS, при поверненні до вкладки й на focus. */
+
+function clearNowMarkers(){
+  document.querySelectorAll(".today-th").forEach(el => el.classList.remove("today-th"));
+  document.querySelectorAll(".today-col").forEach(el => el.classList.remove("today-col"));
+  document.querySelectorAll(".time-cell--now").forEach(el => el.classList.remove("time-cell--now"));
+  document.querySelectorAll(".time-cell--next").forEach(el => el.classList.remove("time-cell--next"));
+  document.querySelectorAll(".lesson-card.is-now").forEach(el => el.classList.remove("is-now"));
+  document.querySelectorAll(".lesson-card.is-next").forEach(el => el.classList.remove("is-next"));
+  document.querySelectorAll(".now-flag").forEach(el => el.remove());
+}
+
+function setNowStatus(el, kind, text){
+  if (!el) return;
+  el.className = "now-status" + (kind ? " is-" + kind : "");
+  el.textContent = text;
+}
+
+/* Підпис заняття для плашки: «3 урок · Математика · 09:50–10:35» */
+function describeNowSlot(item){
+  const isExtra = item.el.dataset.kind === "extra";
+  const parts = [isExtra ? "гурток" : (item.el.dataset.num || "") + " урок"];
+  if (item.el.dataset.subject) parts.push(item.el.dataset.subject);
+  parts.push(minutesToClock(item.start) + "–" + minutesToClock(item.end));
+  return parts.join(" · ");
+}
+
+/* Підсвічує клітинку з часом і саму картку заняття (клас is-now / is-next) */
+function markNowSlot(item, kind){
+  const card = item.el.querySelector(".lesson-card");
+  if (card){
+    card.classList.add(kind === "now" ? "is-now" : "is-next");
+    if (kind === "now"){
+      const flag = document.createElement("span");
+      flag.className = "now-flag";
+      flag.textContent = "Зараз";
+      card.insertBefore(flag, card.firstChild);
+    }
+  }
+  // У гуртків час у лівій колонці не показується — підсвічуємо лише картку
+  if (item.el.dataset.kind !== "extra"){
+    const row = item.el.closest("tr");
+    const timeCell = row ? row.querySelector(".time-cell") : null;
+    if (timeCell) timeCell.classList.add(kind === "now" ? "time-cell--now" : "time-cell--next");
+  }
+}
+
+function updateNowMarkers(){
+  // «Сьогодні + реальний час» — видно одразу, без окремого календаря
+  const dateEl = $(".card--schedule .today-badge");
+  if (dateEl){
+    dateEl.textContent = "";
+    dateEl.appendChild(mk("span", "tb-day", "Сьогодні"));
+    dateEl.appendChild(mk("span", "tb-date", todayLabel()));
+    dateEl.appendChild(mk("span", "tb-clock", minutesToClock(nowMinutes())));
+  }
+
+  if (!document.querySelector(".card--schedule .sched-table")) return; // таблиці немає — підсвічувати нічого
+
+  const mins = nowMinutes();
+  const dayKey = todayKey();
+
+  clearNowMarkers();
+
+  // 1. Клітинка актуального дня тижня — білий муар
+  document.querySelectorAll(".sched-table th[data-day]").forEach(th => {
+    if (th.dataset.day === dayKey) th.classList.add("today-th");
+  });
+  document.querySelectorAll(".sched-table td[data-col]").forEach(td => {
+    if (td.dataset.col === dayKey) td.classList.add("today-col");
+  });
+
+  // 2. Заняття сьогодні — лише заповнені клітинки, у яких задано час
+  const items = [];
+  document.querySelectorAll(".cell-slot[data-day]").forEach(el => {
+    if (el.dataset.day !== dayKey) return;
+    if (!el.querySelector(".lesson-card")) return;
+    items.push({ el, start: timeToMinutes(el.dataset.start), end: timeToMinutes(el.dataset.end) });
+  });
+  const timed = items.filter(it => it.start !== null && it.end !== null);
+  const picked = pickCurrentLesson(timed, mins);
+
+  const statusEl = $(".card--schedule .now-status");
+  if (picked.current){
+    markNowSlot(picked.current, "now");
+    setNowStatus(statusEl, "now", "Зараз: " + describeNowSlot(picked.current));
+  } else if (picked.next){
+    markNowSlot(picked.next, "next");
+    setNowStatus(statusEl, "next", "Далі: " + describeNowSlot(picked.next));
+  } else if (!items.length){
+    setNowStatus(statusEl, "idle", "Сьогодні занять немає");
+  } else if (!timed.length){
+    setNowStatus(statusEl, "idle", "Сьогодні заняття без часу");
+  } else {
+    setNowStatus(statusEl, "idle", "Заняття на сьогодні завершено");
+  }
+}
+
+let nowTicker = null;
+function startNowTicker(){
+  if (nowTicker) return;
+  nowTicker = setInterval(() => {
+    if (document.visibilityState === "hidden") return;
+    updateNowMarkers();
+  }, NOW_TICK_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") updateNowMarkers();
+  });
+  window.addEventListener("focus", updateNowMarkers);
 }
 
 let dragSrc = null;
@@ -1460,5 +1657,6 @@ window.addEventListener("DOMContentLoaded", () => {
   wireEvents();
   buildSidebar();
   loadAll();
+  startNowTicker();
   registerSW();
 });
