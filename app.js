@@ -284,6 +284,10 @@ async function fetchRemote(){
     const res = await fetch(API_URL, { cache: "no-store" });
     if (!res.ok) return null;
     const parsed = await res.json();
+    if (parsed && parsed._offline){
+      // SW повернув fallback без мережі — покажемо тихо
+      showToast("Офлайн-режим: показано останню збережену версію", "info");
+    }
     if (parsed && parsed.updatedAt){
       state.updatedAt = parsed.updatedAt;
       localStorage.setItem(LS_UPDATED_AT, parsed.updatedAt);
@@ -1161,6 +1165,7 @@ function buildSidebar(){
     ["Розклад дзвінків", openSlotEditor],
     ["Оновити з сервера", reloadFromRemote],
     ["Режим редагування", openSettings],
+    ["📱 Встановити застосунок", triggerInstallPrompt],
     ["Експорт JSON", doExport],
     ["Імпорт JSON", () => $("#import-file").click()]
   ];
@@ -1168,6 +1173,134 @@ function buildSidebar(){
 }
 function openSidebar(){ $("#scrim").hidden = false; const s = $("#sidebar"); s.hidden = false; setTimeout(() => s.classList.add("open"), 10); }
 function closeSidebar(){ const s = $("#sidebar"); s.classList.remove("open"); setTimeout(() => { $("#scrim").hidden = true; if (s) s.hidden = true; }, 200); }
+
+/* ============ Service Worker (PWA) ============ */
+
+let swRegistration = null;
+let updateToastShown = false;
+
+function registerSW(){
+  if (!('serviceWorker' in navigator)) return;
+  if (window.location.protocol === 'file:') return; // локально з file:// не працює
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js')
+      .then((reg) => {
+        swRegistration = reg;
+
+        // Якщо на момент реєстрації вже є "waiting" — оновлення чекає
+        if (reg.waiting && navigator.serviceWorker.controller){
+          showUpdateToast();
+        }
+
+        // Слухаємо появу нового SW
+        reg.addEventListener('updatefound', () => {
+          const newSW = reg.installing;
+          if (!newSW) return;
+          newSW.addEventListener('statechange', () => {
+            if (newSW.state === 'installed' && navigator.serviceWorker.controller){
+              // Є контролер + встановився новий → це оновлення (не перша інсталяція)
+              showUpdateToast();
+            }
+          });
+        });
+      })
+      .catch((err) => {
+        console.warn('[SW] Реєстрація помилка:', err);
+      });
+
+    // Коли активний SW змінюється (skipWaiting відпрацював) — перезавантажуємось
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
+
+    // Періодично перевіряємо оновлення (раз на годину, коли вкладка активна)
+    setInterval(() => {
+      if (swRegistration && document.visibilityState === 'visible'){
+        swRegistration.update().catch(() => {});
+      }
+    }, 60 * 60 * 1000);
+
+    // Перевірка при поверненні до вкладки (з довгого простою)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && swRegistration){
+        swRegistration.update().catch(() => {});
+      }
+    });
+  });
+}
+
+function showUpdateToast(){
+  if (updateToastShown) return;
+  updateToastShown = true;
+
+  const existing = document.getElementById('update-toast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.className = 'update-toast';
+  toast.id = 'update-toast';
+  toast.innerHTML =
+    '<span class="ut-text">✨ <b>Оновлення готове</b> — застосунок оновлено.</span>' +
+    '<button type="button" class="ut-btn" id="ut-reload">Перезавантажити</button>' +
+    '<button type="button" class="ut-close" id="ut-close" title="Пізніше" aria-label="Закрити">✕</button>';
+
+  document.body.appendChild(toast);
+
+  document.getElementById('ut-reload').addEventListener('click', () => {
+    if (swRegistration && swRegistration.waiting){
+      swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      // Перезавантаження виконає обробник 'controllerchange'
+    } else {
+      window.location.reload();
+    }
+  });
+
+  document.getElementById('ut-close').addEventListener('click', () => {
+    toast.remove();
+    updateToastShown = false;
+  });
+}
+
+/* Спрацьовує, коли застосунок відкриваєтся як PWA і його "встановили" */
+window.addEventListener('appinstalled', () => {
+  showToast('✔ Застосунок встановлено на пристрій', 'ok');
+});
+
+/* Пропозиція встановити застосунок (Chrome/Edge на Android і desktop).
+   На iOS цієї події немає — там користувач сам через "Поділитися". */
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  // Опціонально: тут можна показати кнопку "Встановити" в UI.
+  // Поки не додаємо — бо в бічному меню і так буде.
+});
+
+function triggerInstallPrompt(){
+  if (!deferredInstallPrompt){
+    // Показуємо підказку для iOS та випадків без події
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+    if (isIOS){
+      showToast('На iOS: тапніть «Поділитися» → «На екран Домівка»', 'info');
+    } else if (window.matchMedia('(display-mode: standalone)').matches){
+      showToast('Застосунок уже встановлено ✔', 'ok');
+    } else {
+      showToast('Встановлення недоступне у цьому браузері', 'err');
+    }
+    return;
+  }
+  deferredInstallPrompt.prompt();
+  deferredInstallPrompt.userChoice.then((choice) => {
+    if (choice.outcome === 'accepted'){
+      showToast('Встановлюємо застосунок…', 'info');
+    }
+    deferredInstallPrompt = null;
+  });
+}
 
 /* ============ Обробники ============ */
 function wireEvents(){
@@ -1250,4 +1383,5 @@ window.addEventListener("DOMContentLoaded", () => {
   wireEvents();
   buildSidebar();
   loadAll();
+  registerSW();
 });

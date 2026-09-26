@@ -1,79 +1,138 @@
 /* ============================================================
-   Service Worker — Family School Web
+   Service Worker для «Дитячий розклад»
    Стратегія:
-     - HTML/CSS/JS оболонка: network-first, з fallback у кеш
-     - schedule.json: network-first без кешу (щоб одразу бачити
-       нову версію після пушу в репозиторій)
-   Щоб форсувати оновлення користувачів — змініть CACHE_VERSION.
+     - App shell (HTML/CSS/JS/іконки) — cache-first + оновлення у фоні
+     - API /api/schedule            — network-first + fallback у кеш
+     - Інше                         — network-only
+
+   Оновлення нової версії SW: показуємо тост у застосунку,
+   користувач тисне «Оновити» — тоді skipWaiting + reload.
    ============================================================ */
 'use strict';
 
-const CACHE_VERSION = "fsc-v1";
-const APP_SHELL = [
-  "./",
-  "./index.html",
-  "./style.css",
-  "./app.js"
+/* ⚠️ ЗМІНЮЙТЕ ВЕРСІЮ при кожному релізі — це змусить браузер
+   витягнути свіжий кеш замість використовувати старий. */
+const VERSION = 'v1.0.0';
+const SHELL_CACHE = 'fsc-shell-' + VERSION;
+const DATA_CACHE = 'fsc-data-' + VERSION;
+
+/* Список ресурсів, які кешуємо одразу при встановленні SW.
+   Іконки не додаємо в precache, щоб SW не впав, якщо їх ще немає —
+   вони закешуються ліниво при першому запиті. */
+const PRECACHE_URLS = [
+  '/',
+  '/index.html',
+  '/style.css',
+  '/app.js',
+  '/manifest.json'
 ];
 
-/* ---------- Install: кладемо оболонку в кеш ---------- */
-self.addEventListener("install", event => {
+/* ============ INSTALL ============ */
+self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_VERSION)
-      .then(cache => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
+    caches.open(SHELL_CACHE)
+      .then((cache) => cache.addAll(PRECACHE_URLS))
+      .catch((err) => {
+        console.warn('[SW] Precache помилка:', err);
+      })
+    // НЕ викликаємо skipWaiting() автоматично — чекаємо на команду з клієнта
   );
 });
 
-/* ---------- Activate: чистимо старі кеші ---------- */
-self.addEventListener("activate", event => {
+/* ============ ACTIVATE ============ */
+self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_VERSION).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    (async () => {
+      // Прибираємо старі кеші
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((k) => k !== SHELL_CACHE && k !== DATA_CACHE)
+          .map((k) => caches.delete(k))
+      );
+      // Одразу беремо контроль над відкритими вкладками
+      await self.clients.claim();
+    })()
   );
 });
 
-/* ---------- Fetch: маршрутизація ---------- */
-self.addEventListener("fetch", event => {
+/* ============ MESSAGE (команди з клієнта) ============ */
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+/* ============ FETCH ============ */
+self.addEventListener('fetch', (event) => {
   const req = event.request;
-  if (req.method !== "GET") return;
+
+  // Ігноруємо не-GET (POST/PUT для API йдуть напряму в мережу)
+  if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
 
-  // schedule.json — завжди свіжий: беремо з мережі, кеш не використовуємо
-  if (url.pathname.endsWith("/schedule.json") || url.pathname.endsWith("schedule.json")){
-    event.respondWith(
-      fetch(req, { cache: "no-store" }).catch(() => new Response(
-        JSON.stringify({ version: 1, children: [] }),
-        { headers: { "Content-Type": "application/json" } }
-      ))
-    );
+  // Не втручаємось у зовнішні домени (fonts.googleapis.com тощо)
+  if (url.origin !== self.location.origin) return;
+
+  // API /api/schedule — network-first з fallback у кеш
+  if (url.pathname === '/api/schedule') {
+    event.respondWith(networkFirst(req, DATA_CACHE));
     return;
   }
 
-  // Шрифти Google — просто мережа з fallback у кеш
-  if (url.origin.includes("fonts.googleapis.com") || url.origin.includes("fonts.gstatic.com")){
-    event.respondWith(
-      fetch(req).then(res => {
-        const copy = res.clone();
-        caches.open(CACHE_VERSION).then(c => c.put(req, copy)).catch(()=>{});
-        return res;
-      }).catch(() => caches.match(req))
-    );
-    return;
-  }
-
-  // Оболонка: network-first, fallback → кеш
-  if (url.origin === self.location.origin){
-    event.respondWith(
-      fetch(req).then(res => {
-        if (res && res.status === 200){
-          const copy = res.clone();
-          caches.open(CACHE_VERSION).then(c => c.put(req, copy)).catch(()=>{});
-        }
-        return res;
-      }).catch(() => caches.match(req).then(hit => hit || caches.match("./index.html")))
-    );
-  }
+  // Все інше (shell + іконки + інші статичні) — cache-first
+  event.respondWith(cacheFirst(req, SHELL_CACHE));
 });
+
+/* ---------- Стратегії ---------- */
+
+async function cacheFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const cached = await cache.match(request);
+
+  if (cached) {
+    // Оновлюємо кеш у фоні (stale-while-revalidate light)
+    fetchAndCache(request, cache).catch(() => {});
+    return cached;
+  }
+
+  try {
+    return await fetchAndCache(request, cache);
+  } catch (err) {
+    // Якщо шукали навігацію (HTML) і немає мережі й кешу — віддаємо index.html
+    if (request.mode === 'navigate') {
+      const shell = await cache.match('/index.html');
+      if (shell) return shell;
+    }
+    throw err;
+  }
+}
+
+async function networkFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  try {
+    const response = await fetch(request);
+    if (response && response.ok) {
+      cache.put(request, response.clone()).catch(() => {});
+    }
+    return response;
+  } catch (err) {
+    // Немає мережі — віддаємо останній збережений розклад
+    const cached = await cache.match(request);
+    if (cached) return cached;
+    // Останній fallback — порожня валідна відповідь, щоб застосунок не впав
+    return new Response(
+      JSON.stringify({ version: 2, children: [], updatedAt: null, _offline: true }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+}
+
+async function fetchAndCache(request, cache) {
+  const response = await fetch(request);
+  if (response && response.ok) {
+    cache.put(request, response.clone()).catch(() => {});
+  }
+  return response;
+}
