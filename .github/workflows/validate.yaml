@@ -15,12 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+        uses: actions/checkout@v6
 
       - name: Validate JavaScript syntax
         run: |
@@ -31,4 +26,5 @@ jobs:
       - name: Validate manifest.json
         run: |
           node -e "JSON.parse(require('fs').readFileSync('manifest.json', 'utf8'))"
+
 
