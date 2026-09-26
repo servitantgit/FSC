@@ -403,21 +403,15 @@ function mk(tag, cls, text, onClick){
 }
 
 function renderReadonlyBanner(){
-  const existing = $("#readonly-banner");
-  if (canEdit()){ if (existing) existing.remove(); return; }
-  if (existing) return;
-  const banner = document.createElement("div");
-  banner.className = "readonly-banner"; banner.id = "readonly-banner";
-  banner.innerHTML = '<span class="ro-text">👁 <b>Режим перегляду</b> — редагування вимкнено. Введіть пароль, щоб публікувати зміни.</span>';
-  const btn = mk("button", null, "Увійти для редагування", openSettings);
-  banner.appendChild(btn);
-  const tabs = $("#child-tabs");
-  tabs.parentNode.insertBefore(banner, tabs);
+  // Банер видалено: перегляд/редагування керується через бічне меню
+  const existing = document.getElementById("readonly-banner");
+  if (existing) existing.remove();
 }
 
 function renderChildTabs(){
-  const nav = $("#child-tabs"); nav.innerHTML = "";
-  if (!state.data.children.length){ nav.appendChild(mk("span", "muted", "Ще немає дітей")); return; }
+  const nav = $("#topbar-children"); if (!nav) return;
+  nav.innerHTML = "";
+  if (!state.data.children.length) return;
   state.data.children.forEach(c => {
     const b = document.createElement("button");
     b.className = "child-tab" + (c.id === state.activeChildId ? " active" : "");
@@ -433,23 +427,12 @@ function renderChildTabs(){
 }
 
 function renderToolbar(){
-  const t = $("#toolbar"); t.innerHTML = "";
+  // Тулбар прибрано. Кнопку "Розклад дзвінків" рендеримо в топбарі.
+  const t = $("#topbar-tools"); if (!t) return;
+  t.innerHTML = "";
   const child = activeChild();
-  if (!child){ t.hidden = true; return; }
-  t.hidden = false;
-  const seg = mk("span", "muted", child.class ? child.name + " • " + child.class : child.name);
-  seg.style.fontSize = "13px";
-  t.append(seg);
-  if (canEdit()){
-    t.append(
-      mk("button", "tool-btn", "Розклад дзвінків", openSlotEditor),
-      mk("button", "tool-btn", "+ Домашка", () => openItemEditor("homework")),
-      mk("button", "tool-btn", "+ Контрольна", () => openItemEditor("exams"))
-    );
-    const del = mk("button", "tool-btn", "Видалити"); del.style.color = "var(--err)";
-    del.addEventListener("click", () => delChild(child.id));
-    t.append(del);
-  }
+  if (!child || !canEdit()) return;
+  t.append(mk("button", "tool-btn", "Розклад дзвінків", openSlotEditor));
 }
 
 function renderContent(){
@@ -471,14 +454,19 @@ function renderContent(){
 
 function renderFooter(){
   const btnSave = $("#btn-save-remote");
-  if (!btnSave) return;
-  if (canEdit()){
-    btnSave.hidden = false;
-    btnSave.disabled = !state.hasLocalChanges || state.saving;
-    btnSave.classList.toggle("pending", state.hasLocalChanges && !state.saving);
-    btnSave.textContent = state.saving ? "Збереження…" : (state.hasLocalChanges ? "💾 Зберегти на сервер" : "✓ Синхронізовано");
-  } else {
-    btnSave.hidden = true;
+  const btnLogout = $("#btn-logout-footer");
+  if (btnSave){
+    if (canEdit()){
+      btnSave.hidden = false;
+      btnSave.disabled = !state.hasLocalChanges || state.saving;
+      btnSave.classList.toggle("pending", state.hasLocalChanges && !state.saving);
+      btnSave.textContent = state.saving ? "Збереження…" : (state.hasLocalChanges ? "💾 Зберегти на сервер" : "✓ Синхронізовано");
+    } else {
+      btnSave.hidden = true;
+    }
+  }
+  if (btnLogout){
+    btnLogout.hidden = !canEdit();
   }
 }
 
@@ -1200,6 +1188,7 @@ function wireEvents(){
   c("btn-save-settings", saveSettings);
   c("btn-logout", doLogout);
   c("btn-save-remote", pushRemote);
+  c("btn-logout-footer", doLogout);
   c("btn-reload-remote", reloadFromRemote);
   c("btn-export", doExport);
   c("btn-import", () => $("#import-file").click());

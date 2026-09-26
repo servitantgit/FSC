@@ -15,21 +15,19 @@
         <button class="icon-btn" id="btn-menu" title="Меню" aria-label="Меню">☰</button>
         <h1 class="topbar__title">Розклад уроків</h1>
       </div>
+      <nav class="topbar__children" id="topbar-children" aria-label="Діти"></nav>
+      <div class="topbar__tools" id="topbar-tools"></div>
       <div class="topbar__right">
         <span class="sync-indicator" id="sync-indicator" title="Стан даних"></span>
         <button class="icon-btn" id="btn-add-child" title="Додати дитину">＋</button>
       </div>
     </header>
 
-    <nav class="child-tabs" id="child-tabs" aria-label="Діти"></nav>
-    <div class="toolbar" id="toolbar"></div>
     <main class="content" id="content"></main>
 
     <div class="footer-actions">
       <button class="btn primary" id="btn-save-remote" hidden>💾 Зберегти на сервер</button>
-      <button class="btn ghost" id="btn-reload-remote">Оновити з сервера</button>
-      <button class="btn ghost" id="btn-export">Експорт JSON</button>
-      <button class="btn ghost" id="btn-import">Імпорт JSON</button>
+      <button class="btn ghost" id="btn-logout-footer" hidden>🔒 Вийти з режиму редагування</button>
       <input type="file" id="import-file" accept=".json,application/json" hidden>
     </div>
   </div>
