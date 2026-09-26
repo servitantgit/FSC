@@ -536,7 +536,7 @@ function renderSchedule(child){
       } else {
         const val = child.days[d] && child.days[d][si];
         if (val && (val.subject || val.room || val.teacher)){
-          const color = val.color || getSubjectColor(child, val.subject);
+          const color = (val.subject ? getSubjectColor(child, val.subject) : null) || val.color || DEFAULT_SUBJECT_COLOR;
           const lesson = document.createElement("div");
           lesson.className = "lesson-card" + (isExtra ? " extra-card" : "") + (editable ? "" : " readonly");
           lesson.draggable = editable;
@@ -889,7 +889,7 @@ function openCellEditor(childId, day, slotIdx){
   if (dl){ dl.innerHTML = ""; collectSubjects(child).forEach(n => { const o = document.createElement("option"); o.value = n; dl.appendChild(o); }); }
 
   // Колір
-  const cur = val.color || (val.subject ? getSubjectColor(child, val.subject) : autoColorFor(child, $("#cell-subject").value));
+  const cur = (val.subject ? getSubjectColor(child, val.subject) : null) || val.color || autoColorFor(child, $("#cell-subject").value);
   buildPalette(child, cur);
 
   // Автопідстановка кольору при введенні відомого предмета
@@ -922,7 +922,18 @@ function commitCell(){
   const start = isExtra ? ($("#cell-start").value || DEFAULT_EXTRA_START) : "";
   const end = isExtra ? ($("#cell-end").value || DEFAULT_EXTRA_END) : "";
 
-  if (subject) setSubjectColor(child, subject, color);
+  if (subject){
+    setSubjectColor(child, subject, color);
+    // Оновлюємо колір у всіх існуючих клітинках цього предмета
+    const norm = normSubject(subject);
+    DAYS.forEach(d => {
+      (child.days[d] || []).forEach(v => {
+        if (v && normSubject(v.subject) === norm){
+          v.color = color;
+        }
+      });
+    });
+  }
 
   const cell = (subject || teacher || room)
     ? { subject, teacher, room, color, start, end }
